@@ -39,7 +39,7 @@ jobs:
           npm ci --prefix ../web
 
       - name: Run tests
-        run: python -m pytest -vv -ra --durations=20 --durations-min=1
+        run: python -m pytest -vv -ra --timeout=120 --durations=20 --durations-min=1
 
   web:
     name: Web build

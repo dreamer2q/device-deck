@@ -54,7 +54,10 @@ dev = [
     "pytest-timeout>=2.3",
     "ruff>=0.5",
     "types-Pillow",
-    "aiosqlite>=0.20",          # 单测专用；运行时还是 asyncpg + PG
+    # Test-only driver: 0.22.x can deadlock during cancelled SQLAlchemy cleanup.
+    # Reproduced with 0.22.1; see omnilib/aiosqlite#369 and wapiti-scanner/wapiti#802.
+    # Runtime uses asyncpg/PostgreSQL, unaffected by this compatibility cap.
+    "aiosqlite>=0.20,<0.22",
     "httpx>=0.27",              # FastAPI TestClient 走 httpx
 ]
 # iOS 接入（M3）：pymobiledevice3 9.x 是当前唯一支持 iOS 26 的版本（DDI manifest
