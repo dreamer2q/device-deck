@@ -1,6 +1,7 @@
 # DeviceDeck MVP — iteration 0001
 
-Started 2026-11-17 by explicit operator instruction. Status: implemented and lab-validated; publication in progress; user acceptance pending.
+Started 2026-11-17 by explicit operator instruction. Status: implemented,
+lab-validated and source published; full Linux CI passed; user acceptance pending.
 
 DeviceDeck is an independent downstream product based on ai-phone, preserving its
 MIT attribution and history. The working name is an implementation choice.
@@ -41,12 +42,17 @@ Do not describe binary WebSocket transport as WebRTC or as a peer-to-peer path.
 | F05 | WDA adapter unchanged; unavailable prerequisites shown honestly | Verified in lab / isolated tests |
 | F06 | Existing native task flow retained and a lightweight Agent task exercised | Verified in lab / isolated tests |
 | F07 | Scoped mirror recovery and device diagnostics | Verified in lab / isolated tests |
-| Publication | Secrets review, attribution, reproducible setup, GitHub push | Final publication step |
+| Publication | Secrets review, attribution, reproducible setup, GitHub push | Published; full Linux CI passed |
 
 Use isolated tests and staging checks before changing the test service. Back up
 changed application files and service launchers; preserve database and credentials.
 Jack Agent restart can stop its emulator cgroup: stop cleanly, restart Agent, then
 start the same registered VM. Never create a replacement VM to hide recovery.
+
+Published source: [dreamer2q/device-deck](https://github.com/dreamer2q/device-deck).
+[Final CI](https://github.com/dreamer2q/device-deck/actions/runs/43936780619)
+passed all three jobs at `7c3212faed7cc613489f7a9baa31a68cf18dfb44`;
+see the validation record for counts, method and remaining limits.
 
 ## Deferred
 

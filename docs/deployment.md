@@ -46,9 +46,10 @@ Run from `backend/` so dotenv paths resolve consistently:
 ```
 
 The unified entry point serves `web/dist`, supports SPA deep links, authenticates
-HTTP and browser WebSockets, and adds the internal bearer header only on the
-server after authentication. `/ws/agent` retains the Agent token validation from
-the core application. `DEVICE_DECK_WEB_DIST` can explicitly select a built web
+HTTP and browser WebSockets, and adds the internal bearer header on the
+server after browser authentication. Machine bearer identities remain unchanged;
+individual API handlers retain their own token checks. `/ws/agent` retains the
+Agent token validation from the core application. `DEVICE_DECK_WEB_DIST` can explicitly select a built web
 directory when sources and runtime are installed separately.
 
 Put the loopback service behind the operator's TLS reverse proxy. Forward HTTP

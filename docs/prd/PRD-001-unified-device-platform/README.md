@@ -24,6 +24,15 @@ Proposed here, not yet accepted as implementation choices:
 - Keep one management application/API and separate platform adapters. Avoid merging entire upstream applications or adopting all their databases and account systems.
 - Keep management APIs central while placing interactive media/input endpoints beside devices. Region selection and routing need validation; neither WebRTC nor a public hostname guarantees a direct path.
 
+## MVP implementation decisions
+
+The operator authorized iteration 0001 on 2026-11-17. The implemented Android
+engine extends the existing MIT scrcpy client with packetized H.264/WebCodecs
+and continuous input; Webscreen was an architectural reference, not an imported
+dependency. The current management and native Agent base is retained from
+ai-phone. Media still relays centrally; per-region direct routing remains a
+proposal. See the iteration and validation records for evidence and limits.
+
 ## User flows
 
 1. An administrator registers a node; attached devices appear once with stable identity, location, readiness and maintenance state.
