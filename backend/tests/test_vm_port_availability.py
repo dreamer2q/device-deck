@@ -4,6 +4,7 @@ from __future__ import annotations
 import errno
 import os
 import socket
+import sys
 from types import SimpleNamespace
 
 import psutil
@@ -58,13 +59,34 @@ def test_closed_owned_connection_is_reusable_by_all_three_call_sites(monkeypatch
 
 
 @pytest.mark.parametrize("listening", [False, True], ids=["bound", "listening"])
-def test_live_owned_loopback_socket_is_never_available(monkeypatch, listening):
+def test_reserved_or_listening_loopback_socket_is_unavailable(monkeypatch, listening):
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as owner:
-        owner.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        # A Linux SO_REUSEADDR bind without listen does not reserve the port:
+        # another reuse-enabled native listener can bind and listen there.
+        # Use an exclusive bind for the reservation case; keep reuse enabled
+        # for the live listener case and the separate TIME_WAIT check above.
+        if listening:
+            owner.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         owner.bind(("127.0.0.1", 0))
         if listening:
             owner.listen(8)
         assert_all_probes(monkeypatch, owner.getsockname()[1], False)
+
+
+@pytest.mark.skipif(not sys.platform.startswith("linux"), reason="Linux reusable bind semantics")
+def test_linux_reusable_nonlistener_allows_an_actual_native_listener(monkeypatch):
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as owner:
+        owner.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        owner.bind(("127.0.0.1", 0))
+        address = owner.getsockname()
+        assert_all_probes(monkeypatch, address[1], True)
+        # Independently verify availability instead of merely accepting the
+        # helper's answer. Both sockets are owned by this isolated test.
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as native:
+            native.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            native.bind(address)
+            native.listen(1)
+            assert_all_probes(monkeypatch, address[1], False)
 
 
 def fake_sockets(monkeypatch, bind_errors, *, connect_result=errno.ECONNREFUSED,
