@@ -29,6 +29,26 @@ from ai_phone.server.storage import mount_static
 from ai_phone.server.ws import include_ws
 
 
+def test_maintenance_cannot_interrupt_owner_and_prevents_reacquire(ws_app):
+    with TestClient(ws_app) as client:
+        with client.websocket_connect(f"/ws/agent?token={get_settings().agent_token}") as agent:
+            agent.send_json({"type": "hello", "agent_id": "maintenance-node",
+                "agent_name": "test-node", "host_os": "Linux", "devices": [{
+                    "serial": "maintenance-phone", "platform": "android", "status": "online"}]})
+            _wait_device_online(client, "maintenance-phone")
+            path = "/api/devices/maintenance-phone"
+            lease = client.post(path + "/lock", json={"holder": "test", "holder_type": "session"})
+            assert lease.status_code == 201
+            assert client.post(path + "/mirror-maintenance", json={"paused": True}).status_code == 409
+            client.request("DELETE", path + "/lock", json={"token": lease.json()["token"]})
+            assert client.post(path + "/mirror-maintenance", json={"paused": True}).json()["paused"]
+            assert client.post(path + "/lock", json={"holder": "new", "holder_type": "session"}).status_code == 409
+            assert client.get(path).json()["extra"]["mirror_paused"]
+            assert client.post("/api/runs", json={"device_serial": "maintenance-phone", "goal": "read screen"}).status_code == 409
+            assert client.post(path + "/mirror-maintenance", json={"paused": False}).status_code == 200
+            assert client.post(path + "/lock", json={"holder": "new", "holder_type": "session"}).status_code == 201
+
+
 @pytest.fixture
 def storage_tmp(monkeypatch):
     """把 storage_dir 指向独立临时目录。"""

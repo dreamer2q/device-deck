@@ -1,6 +1,6 @@
 // APM1 browser mirror envelopes. The JSON form remains supported for old servers.
 const decoder = new TextDecoder('utf-8', { fatal: true })
-const mediaTypes = new Set(['video_init', 'video_segment', 'mirror_jpeg'])
+const mediaTypes = new Set(['video_init', 'video_segment', 'mirror_jpeg', 'h264_packet'])
 
 export function mediaBytes(value) {
   if (value instanceof Uint8Array) return value

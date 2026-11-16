@@ -185,7 +185,9 @@ class AgentWSClient:
             # its own queue. Neither may precede the connection's hello.
             return False
         try:
-            await ws.send(json.dumps(payload, ensure_ascii=False))
+            from ai_phone.shared.mirror_wire import encode_mirror_message
+            binary = encode_mirror_message(payload) if isinstance(payload.get("data"), bytes) else None
+            await ws.send(binary if binary is not None else json.dumps(payload, ensure_ascii=False))
             return True
         except ConnectionClosed:
             return False

@@ -22,7 +22,9 @@ from loguru import logger
 
 from ai_phone.shared import protocol as P
 
-from ._deps import get_hub
+import asyncio
+from .realtime import RealtimeInput
+from ._deps import get_hub, get_lock_store
 
 router = APIRouter()
 
@@ -30,7 +32,12 @@ router = APIRouter()
 @router.websocket("/ws/browser/{serial}")
 async def browser_ws(ws: WebSocket, serial: str) -> None:
     hub = get_hub(ws)
+    if hub.mirror_paused(serial):
+        await ws.close(code=4410, reason="mirror paused")
+        return
     await ws.accept()
+    controls = RealtimeInput(hub, get_lock_store(ws), serial)
+    watcher = asyncio.create_task(controls.watch())
     sub_count = await hub.subscribe(serial, ws, binary_mirror=ws.query_params.get("mirror") == "binary-v1")
     logger.info("Browser 订阅 serial={} 当前订阅数={}", serial, sub_count)
 
@@ -47,13 +54,18 @@ async def browser_ws(ws: WebSocket, serial: str) -> None:
             # 浏览器可能发心跳；不强制
             data = await ws.receive_json()
             t = data.get("type")
-            if t == "ping":
+            if t == "touch":
+                await ws.send_json(await controls.handle(data))
+            elif t == "ping":
                 await ws.send_json({"type": "pong", "ts": data.get("ts")})
     except WebSocketDisconnect:
         pass
     except Exception as exc:  # noqa: BLE001
         logger.warning("Browser WS 异常 serial={} err={}", serial, exc)
     finally:
+        await controls.cancel()
+        watcher.cancel()
+        await asyncio.gather(watcher, return_exceptions=True)
         remaining = await hub.unsubscribe(serial, ws)
         logger.info("Browser 取消订阅 serial={} 剩余订阅数={}", serial, remaining)
         if remaining == 0:

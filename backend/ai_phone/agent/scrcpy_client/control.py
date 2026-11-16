@@ -138,7 +138,7 @@ class ControlSender:
         if sock is None:
             return
         with self.parent.control_socket_lock:
-            sock.send(data)
+            sock.sendall(data)
 
     # ---- 显式屏幕尺寸的 touch / swipe ----
     # 上面 ``touch`` / ``swipe`` 用的是 ``self.parent.resolution``（= scrcpy 编

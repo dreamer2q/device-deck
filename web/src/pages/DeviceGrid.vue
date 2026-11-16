@@ -15,6 +15,16 @@ const filter = ref('all')
 const search = ref('')
 let pollTimer = null
 
+async function maintenance(device) {
+  try {
+    await fetch(`/api/devices/${encodeURIComponent(device.serial)}/mirror-maintenance`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ paused: !device.extra?.mirror_paused }),
+    }).then(async r => { if (!r.ok) throw Error((await r.json()).detail || '维护操作失败') })
+    await refresh()
+  } catch (e) { error.value = String(e) }
+}
+
 async function refresh() {
   loading.value = true
   error.value = null
@@ -297,7 +307,7 @@ function prettyErr(e) {
       <div v-else class="agent-empty">暂无在线 Agent</div>
     </details>
 
-    <DeviceTable v-if="filtered.length" :devices="filtered" @edit-alias="openEdit" />
+    <DeviceTable v-if="filtered.length" :devices="filtered" @edit-alias="openEdit" @maintenance="maintenance" />
     <p v-else class="empty">
       暂无符合条件的设备。确认 Agent 已连上 Server（见后端日志 "Agent 上线"）。
     </p>

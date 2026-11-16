@@ -37,7 +37,7 @@ onBeforeUnmount(() => {
     <header class="top">
       <RouterLink to="/" class="brand">
         <span class="logo">◎</span>
-        <span class="name">ai-phone</span><span class="edition">COMPACT</span>
+        <span class="name">DeviceDeck</span><span class="edition">MVP</span>
       </RouterLink>
       <nav aria-label="主导航">
         <RouterLink to="/" class="tab" active-class="on" exact>设备总览</RouterLink>

@@ -10,6 +10,7 @@ export function openDeviceStream(serial, { onMessage, onOpen, onClose } = {}) {
   let attempt = 0
   let socket = null
   let pingTimer = null
+  let inputSequence = 0
 
   function scheduleReconnect() {
     if (stopped) return
@@ -67,6 +68,12 @@ export function openDeviceStream(serial, { onMessage, onOpen, onClose } = {}) {
   connect()
 
   return {
+    touch(params) {
+      if (!socket || socket.readyState !== WebSocket.OPEN) return false
+      if (socket.bufferedAmount > 65536) { socket.close(4002, "input backpressure"); return false }
+      socket.send(JSON.stringify({ type: "touch", ...params, seq: ++inputSequence }))
+      return true
+    },
     resync() {
       // A reconnect replays the Agent's init and resumes at its next keyframe.
       // The HTTP device lease remains held by useDeviceLock.

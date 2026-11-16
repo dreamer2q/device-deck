@@ -287,7 +287,15 @@ async def agent_ws(
 
     try:
         while True:
-            msg = await ws.receive_json()
+            envelope = await ws.receive()
+            if envelope["type"] == "websocket.disconnect":
+                raise WebSocketDisconnect(envelope.get("code", 1000))
+            if envelope.get("bytes") is not None:
+                from ai_phone.shared.mirror_wire import decode_mirror_message
+                msg = decode_mirror_message(envelope["bytes"])
+            else:
+                import json
+                msg = json.loads(envelope.get("text") or "{}")
             if not hub.is_current_agent_socket(agent_id, ws):
                 break
             try:
@@ -419,6 +427,7 @@ async def _dispatch(
             P.MSG_MIRROR_JPEG,
             P.MSG_VIDEO_INIT,
             P.MSG_VIDEO_SEGMENT,
+            "h264_packet",
         }
         and not _current_managed_harmony_route(hub, agent_id, serial)
     ):
@@ -518,7 +527,7 @@ async def _dispatch(
                 _NO_SUB_COUNT.pop(serial, None)
         return
 
-    if t == P.MSG_VIDEO_INIT or t == P.MSG_VIDEO_SEGMENT:
+    if t in {P.MSG_VIDEO_INIT, P.MSG_VIDEO_SEGMENT, "h264_packet"}:
         # MSE 视频流：fmp4 init / media segment，纯转发，不落库不解析
         # （体量与频率比 MSG_FRAME 还小，单帧约 ~10KB，base64 后 ~13KB）
         if serial:

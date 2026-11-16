@@ -10,6 +10,7 @@ import { api } from '../lib/api.js'
 import { platformLabel } from '../lib/platform.js'
 import { openDeviceStream } from '../lib/ws.js'
 import { useDeviceLock } from '../lib/useDeviceLock.js'
+import { H264Player } from '../lib/h264Player.js'
 import { useMseMirror } from '../lib/useMseMirror.js'
 import { useJpegMirror } from '../lib/useJpegMirror.js'
 
@@ -94,6 +95,30 @@ function normalizeErrorSummary(summary) {
 //              走这里；设备旋转天然自适应，没有 init segment 概念
 const mirror = useMseMirror({ liveSyncSeconds: 0.18, debug: false, onResync: () => sub?.resync() })
 const jpegMirror = useJpegMirror({ debug: false })
+const canvasEl = ref(null)
+const rawReady = ref(false)
+const rawError = ref(null)
+const rawFps = ref(0)
+const rawQueue = ref(0)
+let rawFrames = 0, rawSampleAt = performance.now()
+const rawPlayer = new H264Player({
+  canvas: () => canvasEl.value,
+  onFrame: ({ width, height, queue }) => {
+    rawReady.value = true
+    rawError.value = null
+    frameSize.value = { w: width, h: height }
+    androidFrameReady.value = true
+    rawQueue.value = queue
+    rawFrames++
+    const now = performance.now()
+    if (now - rawSampleAt > 1000) {
+      rawFps.value = Math.round(rawFrames * 1000 / (now - rawSampleAt))
+      rawFrames = 0; rawSampleAt = now
+    }
+  },
+  onError: message => { rawError.value = message },
+  onResync: () => sub?.resync(),
+})
 const mirrorMode = ref(null) // null | 'mse' | 'jpeg'
 
 // 设备启动/链路状态（仅 iOS WDA 首次建立时有内容）：
@@ -125,13 +150,13 @@ function applyDeviceStatus(msg) {
 const videoEl = mirror.videoEl
 const imgEl = jpegMirror.imgEl
 const mirrorEl = computed(() => (
-  mirrorMode.value === 'jpeg' ? imgEl.value : videoEl.value
+  mirrorMode.value === 'h264' ? canvasEl.value : mirrorMode.value === 'jpeg' ? imgEl.value : videoEl.value
 ))
 const mirrorReady = computed(() => (
-  mirrorMode.value === 'jpeg' ? jpegMirror.ready.value : mirror.ready.value
+  mirrorMode.value === 'h264' ? rawReady.value : mirrorMode.value === 'jpeg' ? jpegMirror.ready.value : mirror.ready.value
 ))
 const mirrorError = computed(() => (
-  mirrorMode.value === 'jpeg' ? jpegMirror.error.value : mirror.error.value
+  mirrorMode.value === 'h264' ? rawError.value : mirrorMode.value === 'jpeg' ? jpegMirror.error.value : mirror.error.value
 ))
 
 const mirrorWrap = ref(null)
@@ -680,7 +705,7 @@ function onKbBlur()  { kbFocused.value = false }
 function _mediaSize(el) {
   // A new JPEG URL can temporarily report zero dimensions while loading.
   // Map input against the last completed image, recorded by the load handler.
-  if (el && el === imgEl.value) return frameSize.value
+  if (el && (el === imgEl.value || el === canvasEl.value)) return frameSize.value
   if (el?.videoWidth && el.videoHeight) return { w: el.videoWidth, h: el.videoHeight }
   return { w: 0, h: 0 }
 }
@@ -699,8 +724,15 @@ function _mapToDevice(ev, el, { clamp = false, rect = el.getBoundingClientRect()
   }
 }
 
+function sendTouch(phase, point = { x: gesture.x0, y: gesture.y0 }) {
+  const frame = androidMirror.value
+  if (!frame || !lock.token.value) return false
+  return sub?.touch({ phase, ...point, width: frame.width, height: frame.height,
+    stream_id: frame.stream_id, lock_token: lock.token.value }) || false
+}
+
 function onMirrorPointerDown(ev) {
-  if (!canSendInput.value) return
+  if (!canSendInput.value || gesture.active) return
   const el = mirrorEl.value
   const { w: nw, h: nh } = _mediaSize(el)
   if (!el || !nw || !nh) return
@@ -723,18 +755,25 @@ function onMirrorPointerDown(ev) {
   gesture.x0 = p.x
   gesture.y0 = p.y
   gesture.t0 = performance.now()
+  gesture.pointerId = ev.pointerId
+  if (mirrorMode.value === "h264" && !sendTouch("down", p)) gesture.active = false
   // 顺手把键盘焦点拿到隐藏 textarea，这样紧接着敲字就直接打到手机
   _focusKb()
 }
 
 function onMirrorPointerMove(ev) {
-  if (!gesture.active) return
+  if (!gesture.active || gesture.pointerId !== ev.pointerId) return
+  if (mirrorMode.value === 'h264') {
+    const point = _mapToDevice(ev, mirrorEl.value, { clamp: true, rect: gesture.rect })
+    if (canSendInput.value && point) sendTouch('move', point)
+    else onMirrorPointerCancel()
+  }
   // 按下后移动时也要吃掉默认（避免选中、拖图）
   ev.preventDefault()
 }
 
 async function onMirrorPointerUp(ev) {
-  if (!gesture.active) return
+  if (!gesture.active || gesture.pointerId !== ev.pointerId) return
   gesture.active = false
   const el = mirrorEl.value
   if (!el) return
@@ -748,6 +787,7 @@ async function onMirrorPointerUp(ev) {
   // 键盘捕获提示可能改变画面容器高度，整次手势使用按下时的画面位置。
   const end = _mapToDevice(ev, el, { clamp: true, rect: gesture.frame || gesture.nativeSize ? gesture.rect : undefined })
     || { x: gesture.x0, y: gesture.y0 }
+  if (mirrorMode.value === 'h264') { sendTouch('up', end); return }
   const dx = end.x - gesture.x0
   const dy = end.y - gesture.y0
   const frame = gesture.frame
@@ -802,6 +842,7 @@ async function onMirrorPointerUp(ev) {
 }
 
 function onMirrorPointerCancel() {
+  if (gesture.active && mirrorMode.value === 'h264') sendTouch('cancel')
   gesture.active = false
 }
 
@@ -855,6 +896,19 @@ function onMessage(msg) {
         attempt: msg.attempt,
         timestamp: msg.ts || Date.now() / 1000,
       })
+      break
+    case 'input_ack':
+      if (!msg.ok) { gesture.active = false; rawError.value = `输入被拒绝：${msg.reason || '设备离线'}` }
+      break
+    case 'h264_packet':
+      mirrorMode.value = 'h264'
+      if (androidMirror.value?.stream_id !== msg.stream_id || androidMirror.value?.width !== msg.width
+          || androidMirror.value?.height !== msg.height) {
+        onMirrorPointerCancel()
+        androidMirror.value = { stream_id: msg.stream_id, width: msg.width, height: msg.height }
+        androidFrameReady.value = false
+      }
+      rawPlayer.handle(msg)
       break
     case 'video_init':
       if (mirrorMode.value == null) mirrorMode.value = 'mse'
@@ -1130,6 +1184,7 @@ onMounted(async () => {
     imgEl.value.addEventListener('load', _onVideoSizeChange)
   }
   window.addEventListener('resize', onViewportResize)
+  window.addEventListener('blur', onMirrorPointerCancel)
   if (layoutEl.value && typeof ResizeObserver !== 'undefined') {
     layoutObserver = new ResizeObserver(onViewportResize)
     layoutObserver.observe(layoutEl.value)
@@ -1143,6 +1198,9 @@ onMounted(async () => {
     },
     onClose: () => {
       wsConnected.value = false
+      gesture.active = false
+      rawPlayer.reset()
+      rawReady.value = false
       if (duoVm.value) {
         jpegMirror.reset()
         frameSize.value = { w: 0, h: 0 }
@@ -1160,6 +1218,9 @@ onMounted(async () => {
 })
 
 onBeforeUnmount(() => {
+  onMirrorPointerCancel()
+  rawPlayer.reset()
+  window.removeEventListener("blur", onMirrorPointerCancel)
   if (sub) sub.close()
   if (deviceTimer) clearInterval(deviceTimer)
   if (videoEl.value) {
@@ -1236,6 +1297,10 @@ watch(
             <span class="mirror-size" v-if="displaySize.w">
               {{ displaySize.w }}×{{ displaySize.h }}
             </span>
+            <span v-if="mirrorMode === 'h264'" class="playback-stats" title="实际显示帧率和解码队列，不是端到端延迟">
+              WebCodecs · {{ rawFps }} FPS · 队列 {{ rawQueue }}
+            </span>
+            <button class="btn small" @click="onMirrorPointerCancel(); sub?.resync()">恢复画面</button>
             <span v-if="mirrorMode === 'mse'" class="playback-stats"
               title="实际播放帧率与播放器待播缓冲；不是点击到显示的端到端延迟">
               {{ mirror.fps.value }} FPS · 缓冲 {{ mirror.bufferedMs.value }} ms
@@ -1246,7 +1311,7 @@ watch(
               VLM 运行中 · 手动 tap / 键盘 可插入
             </span>
             <span class="mirror-hint" v-else-if="!lock.readonly.value">
-              点击 = tap · 拖动 = swipe · 点画面后键盘直接输入
+              点击或按住拖动 · 点画面后键盘输入
             </span>
             <span class="mirror-hint ro" v-else>
               已被他人占用（只读）
@@ -1306,6 +1371,11 @@ watch(
             <!-- MSE 视频：muted + autoplay + playsinline 让 Chrome/Safari 都能直接自动播放 -->
             <!-- ref="videoEl" 与 useMseMirror 内部的 videoEl 是同一个 ref（别名），
                  模板把 DOM 写进来，composable 那边就能看到。mirrorMode='mse' 才显示 -->
+            <canvas ref="canvasEl" v-show="mirrorMode === 'h264' && mirrorReady"
+              :class="{ clickable: canSendInput }" aria-label="Android 实时画面"
+              @pointerdown="onMirrorPointerDown" @pointermove="onMirrorPointerMove"
+              @pointerup="onMirrorPointerUp" @pointercancel="onMirrorPointerCancel"
+              @lostpointercapture="onMirrorPointerCancel" @dragstart="onMirrorDragStart" />
             <video
               ref="videoEl"
               v-show="mirrorMode === 'mse' && mirrorReady"
@@ -1881,6 +1951,7 @@ h2 {
   font-size: 11px;
 }
 .playback-stats { color: #9aaec6; font-size: 10px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.mirror-bar button { padding: 3px 7px; border: 1px solid #384354; border-radius: 4px; background: #202a36; color: #c4d0df; font: inherit; cursor: pointer; }
 .mirror-hint { font-size: 10px; }
 .android-screen-controls {
   display: flex;
@@ -1935,6 +2006,7 @@ h2 {
   overflow: hidden;
   min-height: 0;
 }
+.mirror canvas,
 .mirror video,
 .mirror img {
   /* 关键：固定 100%×100% + object-fit:contain，让 video/img 元素盒子永远
@@ -1949,6 +2021,7 @@ h2 {
   user-select: none;
   touch-action: none;
 }
+.mirror canvas.clickable,
 .mirror video.clickable,
 .mirror img.clickable {
   cursor: crosshair;

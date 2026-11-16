@@ -59,6 +59,7 @@ class Hub:
         self._device_readiness: Dict[str, Dict[str, Any]] = {}
         self._readiness_received_at: Dict[str, float] = {}
         self._vm_maintenance: Dict[str, str] = {}
+        self._mirror_paused: Set[str] = set()
 
     def set_device_extra(self, serial: str, extra: Optional[Dict[str, Any]]) -> None:
         """覆盖设备的 rescan 元信息；空 dict / None 会清空该 serial 的条目。
@@ -99,6 +100,22 @@ class Hub:
             return
         self._device_readiness[serial] = dict(payload)
         self._readiness_received_at[serial] = time.monotonic()
+
+    def mirror_paused(self, serial: str) -> bool:
+        return serial in self._mirror_paused
+
+    async def pause_mirror(self, serial: str, paused: bool) -> None:
+        if not paused:
+            self._mirror_paused.discard(serial)
+            return
+        self._mirror_paused.add(serial)
+        for ws in list(self._subs.get(serial, ())):
+            try:
+                await ws.close(code=4410, reason="mirror paused for maintenance")
+            except Exception:
+                pass
+            await self.unsubscribe(serial, ws)
+        await self.send_to_serial(serial, {"type": "stop_mirror", "serial": serial})
 
     def set_vm_maintenance(self, serial: str, vm_id: Optional[str]) -> None:
         """Prevent a late probe from admitting work during lifecycle changes."""
@@ -141,6 +158,9 @@ class Hub:
                 out["readiness"].update(ready=False, not_ready_reason="probe_stale", hint="设备健康状态已过期，等待重新确认")
         if serial in self._vm_maintenance:
             out["readiness"] = {"ready": False, "not_ready_reason": "vm_maintenance", "hint": "虚拟机生命周期操作尚未完成"}
+        if self.mirror_paused(serial):
+            out["mirror_paused"] = True
+            out["readiness"] = {"ready": False, "not_ready_reason": "mirror_paused", "hint": "镜像已临时暂停，请从设备总览恢复"}
         return out
 
     def clear_device_extra(self, serials: Set[str]) -> None:
@@ -363,9 +383,14 @@ class Hub:
         async def _send(ws: WebSocket) -> bool:
             try:
                 if binary is not None and ws in self._binary_mirror_subs:
-                    await ws.send_bytes(binary)
+                    await asyncio.wait_for(ws.send_bytes(binary), timeout=2)
                 else:
-                    await ws.send_json(payload)
+                    if isinstance(payload.get("data"), bytes):
+                        import base64
+                        payload_json = {**payload, "data": base64.b64encode(payload["data"]).decode("ascii")}
+                    else:
+                        payload_json = payload
+                    await asyncio.wait_for(ws.send_json(payload_json), timeout=2)
                 return True
             except Exception:  # noqa: BLE001
                 return False

@@ -12,16 +12,16 @@ import json
 import struct
 from typing import Any
 
-MEDIA_TYPES = frozenset({"video_init", "video_segment", "mirror_jpeg"})
+MEDIA_TYPES = frozenset({"video_init", "video_segment", "mirror_jpeg", "h264_packet"})
 MAGIC = b"APM1"
 MAX_HEADER = 16 * 1024
 
 
 def encode_mirror_message(payload: dict[str, Any]) -> bytes | None:
-    if payload.get("type") not in MEDIA_TYPES or not isinstance(payload.get("data"), str):
+    if payload.get("type") not in MEDIA_TYPES or not isinstance(payload.get("data"), (str, bytes)):
         return None
     try:
-        media = base64.b64decode(payload["data"], validate=True)
+        media = payload["data"] if isinstance(payload["data"], bytes) else base64.b64decode(payload["data"], validate=True)
     except (binascii.Error, ValueError):
         return None
     header = json.dumps(
@@ -31,3 +31,15 @@ def encode_mirror_message(payload: dict[str, Any]) -> bytes | None:
     if len(header) > MAX_HEADER:
         return None
     return MAGIC + struct.pack(">I", len(header)) + header + media
+
+
+def decode_mirror_message(raw: bytes) -> dict[str, Any]:
+    if len(raw) < 8 or raw[:4] != MAGIC:
+        raise ValueError("invalid media envelope")
+    size = struct.unpack(">I", raw[4:8])[0]
+    if not 0 < size <= MAX_HEADER or 8 + size > len(raw):
+        raise ValueError("invalid media header")
+    header = json.loads(raw[8:8+size])
+    if not isinstance(header, dict) or header.get("type") not in MEDIA_TYPES:
+        raise ValueError("invalid media type")
+    return {**header, "data": raw[8+size:]}

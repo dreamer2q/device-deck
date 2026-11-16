@@ -1,324 +1,108 @@
-<p align="right">
-  简体中文 | <a href="./README.en.md">English</a>
-</p>
+# DeviceDeck
 
-# ai-phone
+Compact device management and responsive Android remote control, with native AI
+Agent workflows. 一个统一的设备管理与远控工作台。
 
-> **Compact downstream fork**：此分支维护紧凑设备表格、工作台和有界视频播放优化，
-> 不代表上游官方发布。实现范围、兼容性及验收限制见
-> [Compact workbench](./docs/downstream/compact-workbench.md)。下方原项目介绍与截图保留用于说明上游能力。
+DeviceDeck 基于 [ai-phone](https://github.com/dongxinsuperman/ai-phone) 的 MIT 源码与
+管理／任务能力开发，保留原作者署名和提交历史。它是独立下游项目，不是上游官方版本。
+当前重点是 Android 手控体验；iOS 继续使用 WDA。
 
-[![CI](https://github.com/dongxinsuperman/ai-phone/actions/workflows/ci.yml/badge.svg)](https://github.com/dongxinsuperman/ai-phone/actions/workflows/ci.yml)
+## MVP 能做什么
 
-<p align="center">
-  <img src="./assets/hero/ai-phone-hero.gif" alt="ai-phone AI automation flow overview" width="100%">
-</p>
+- 紧凑设备表格：搜索、别名、型号、节点、在线／就绪状态和当前占用。
+- 浏览器内 Android 实时画面、连续按下／移动／抬起、键盘、导航键与画面恢复。
+- 设备原始 H.264 → 二进制 WebSocket → WebCodecs；Android 新路径不做 FFmpeg 重编码或 MP4 分片。
+- 自动选择设备编码器，避免强制使用 Google 软件编码器。
+- 人工与 Agent 共用设备锁；每条实时输入检查当前锁，断线、释放、过期时清理未抬起的触控。
+- 空闲设备可临时暂停／恢复镜像，已占用设备拒绝维护操作。
+- 多节点设备发现、注册、心跳和重连；保留原生 Agent 任务、队列、历史、应用分发及模拟器管理。
+- 保留 iOS WDA 适配与明确的未就绪提示；本次未完成新 Apple 签名。
 
-**面向中小型公司的三端真机 + 三端虚拟机 AI 自动化中台** —— iOS / Android / HarmonyOS 真机与虚拟机同级纳管，自然语言驱动的纯视觉决策，开箱即用的调度队列与多设备并发，执行器可插拔，一台 Mac 即可起完整链路。新 Mac 从 0 到 1 的完整部署见 [deployment-from-zero（从0到1部署指南）](./docs/deployment-from-zero（从0到1部署指南）.md)。
+## 实测对照
 
-> **产品形态**：ai-phone 不是一个执行器 SDK，而是把"投递批次 → 设备池调度 → 自然语言执行 → 终态广播 + HTML 报告 + 大盘统计"做成 QA 团队 / 业务回归大盘开箱即用的中台能力。**执行器是其中一个可替换组件**：默认内置自研的 VLM 纯视觉决策循环，并在外层包了页面稳定、卡死检测、审判、断言、状态路标、瞬态 UI 处理等执行安全层；也可挂载第三方执行器作为额外引擎选项。
+同一台 Android 10 真机、同一 USB/节点/前台 Chrome，440×960、30 FPS 上限、同一服务下发的码率配置，30 次重复点击：
 
-> **产品边界与出发点**：ai-phone 不是孤立的“点手机工具”，也不是测试平台本身，而是 AI 测试链路里的三端设备执行层。上游可以由 Cursor、CI、内部平台或 AI 助手生成可消费测试 case，下游由 ai-phone 把这些自然语言 case 投递到 iOS / Android / HarmonyOS 真机与虚拟机上执行，并回传截图、日志、报告和终态结果。详细说明见 [product-boundaries（产品边界）](./docs/product-boundaries（产品边界）.md)。
+| 测量边界 | 原 ai-phone compact | DeviceDeck |
+|---|---:|---:|
+| P50 | 833.3 ms | 70.3 ms |
+| P95 | 1,039.4 ms | 95.6 ms |
+| 成功观察到页面颜色变化 | 30 / 30 | 30 / 30 |
 
----
+测量为 **浏览器合成 pointer-down → 手机测试页面响应 → 浏览器解码像素变化**，包含
+40ms 模拟点击持有时间；不包含操作系统输入采样或显示器物理扫描。它不是互联网所有
+环境的延迟承诺，也不是与原生 scrcpy 窗口的对比。新版另验证了按住时已经响应，而非松手后才提交滑动。
 
-## 看一眼实际样子
+方法、原始样本和限制见 [MVP 验证](docs/validation/mvp-0001/README.md)。
 
-![设备总览 · 多 Agent 统一纳管 iOS / Android / HarmonyOS 真机与虚拟机](./assets/screenshots/devices-overview-multi.png)
+## 架构与边界
 
-按"调度 → 调试 → 决策护城河 → 产出 → 观测"5 个节点串起来看：
-
-**1. 调度队列** —— 三端独立 FIFO + 正在执行 + 最近批次状态一栏拉通，外部投递的 Submission 实时分发到设备池：
-
-![队列总览 · Android / iOS / HarmonyOS 三端独立排队 + 正在执行 + 最近批次](./assets/screenshots/queue-overview.png)
-
-**2. 单设备调试** —— 浏览器即客户端：左实时画面（scrcpy / WDA / hypium 三端原生推流）、右自然语言 Goal 输入 + 步骤日志面板，回写通道与 VLM 共用，业务测试同学零安装、零配置：
-
-![设备工作台 · 左实时画面 + 右自然语言 Goal 输入 + 日志面板](./assets/screenshots/device-workbench-ios.png)
-
-**3. 辅助系统护城河** —— ai-phone 不是把截图直接交给 VLM 赌下一步，而是在执行外层加了一套可监督的安全层：页面稳定后再决策，本地 pHash 捕捉同坐标 / 同屏 / 滑动震荡，异常自动召唤审判系统，终局用 before / after 双图断言。轨迹缓存回放还会用 V2 状态路标对齐页面、V3 意图回放重新定位控件，并把非业务瞬态弹窗标记为 optional gate，避免"首跑关弹窗"污染后续复跑。
-
-![审判系统 · 同坐标震荡触发召唤，独立模型实时审视后放行](./assets/screenshots/assist-judge-system.png)
-
-> 完整辅助能力（页面稳定 / 通道判定 / 卡死检测 / 审判 / 断言 / 状态路标 / 瞬态弹窗 gate）见 [辅助系统核心逻辑及效果](./docs/assistant-systems（辅助系统核心逻辑及效果）.md)。
-
-**4. 自包含 HTML 报告** —— 单 case 与三端汇总两级，每步操作前 / 操作后双图对照 + Token 统计 + VLM 思考全留痕，零外部依赖、匿名可访问，便于外部平台直接嵌入：
-
-![三端汇总 HTML 报告 · 操作前 / 操作后双图对照 + 步骤时间线 + token 统计](./assets/screenshots/report-three-platform.png)
-
-**5. 运维大盘** —— 吞吐 / 设备健康 / Token 用量 / 稳定性四象限一页呈现；AI 分析卡片基于当日数据生成 4 段中文总结，跟随 `ASSISTANT_BACKEND` 在豆包 / Claude / GPT 间自由切换：
-
-![运维大盘 · 吞吐 / 设备 / Token / 稳定性四象限 + AI 摘要](./assets/screenshots/analytics-overview.png)
-
-**6. iOS / Android / 鸿蒙三端虚拟机扩容（`main` 独有）** —— ai-phone 将三端真机与三端虚拟机纳入同一个设备池。虚拟机要解决的，不是怎么让一台设备跑得更快，而是怎么让设备供给跟上测试并发。
-
-![虚拟机页 · Android 与鸿蒙独立配置并下发到 Agent](./assets/screenshots/virtual-machines.png)
-
-**决定测试耗时的是并发，不是脚本效率。** 100 条 case 分到 100 台设备，墙钟时间接近其中耗时最长的一条，跟 case 总量无关。测试从一个随需求规模线性增长的环节，变成接近常数时间。
-
-并发成立的前提，是拥有足够多可以同时工作的设备。同一台真机一次只能承接一个任务，相同机型、相同系统和相同配置的真机也无法随时复制；虚拟机复制配置就能增加设备供给，让承接能力从靠采购增长，变成靠计算资源增长。
-
-![iOS 虚拟机 · 左侧选择 Simulator 机型，右侧展示真实 iPad 实时画面](./assets/screenshots/ios-virtual-machines.png)
-
-**虚拟机没有引入新架构，只是让设备供给不再受限。** ai-phone 原本就是每台电脑运行一个 Agent，把手边的设备接入并聚合成共享池。虚拟机加入后，任务投递、设备占用、工作台、自然语言执行、日志、报告和结果回传都没有改变；变化的只是设备来源从“手上有几台手机”，扩展到“电脑还能运行多少台虚拟设备”。
-
-![设备总览 · iOS、Android、鸿蒙真机与虚拟机统一纳管](./assets/screenshots/devices-overview-vm-three-platform.png)
-
-三端真机与三端虚拟机进入同一个设备池、复用同一条任务执行链路，对外仍然只有 iOS、Android、HarmonyOS 三个平台。环境准备见 [Android 虚拟机 Agent 环境准备](./docs/agent-vm-env-setup（Agent虚拟机环境准备）.md)、[iOS 虚拟机 Agent 环境准备](<./docs/agent-ios-sim-vm-env-setup（Agent iOS虚拟机环境准备）.md>) 与 [鸿蒙虚拟机 Agent 环境准备](./docs/agent-harmony-vm-env-setup（Agent鸿蒙虚拟机环境准备）.md)；鸿蒙当前形态与后续 Provider 规划见 [harmony-vm-architecture](./docs/harmony-vm-architecture（鸿蒙虚拟机当前架构与演进规划）.md)。
-
-**v0.8 · JEV多模态决策：三端手机点击，迈向秒级执行**
-
-**让已知目标快速落到手机上。** ai-phone为V3缓存回放引入JEV多模态点击通道，将目标定位收敛为一次候选选择，并打通Android、iOS、HarmonyOS的截图、定位和设备执行。已有安卓实测中，包含模型往返的一次点击链路达到**约0.99秒**，已完整接入AI Phone的执行生态中。
-
-![Jev Phone · 三端多模态视觉交互通道与点击演示页面](./assets/jev/jev-overview.svg)
-
-当前承接V3回放中的普通Click：缓存提供操作目标，JEV定位当前画面中的目标，设备通道执行点击。后续将扩大场景覆盖，并探索输入、滚动、长按等动作的承接。
-
-![JEV连续答题回放 · 原速片段与秒表](./assets/jev/jev-five-questions.gif)
-
-**实时定位，真实点击。** 截图与控件位置实时采集、编号标注后发送给模型；模型返回目标编号，系统映射并换算点击坐标，直接驱动手机执行。
-
-<table>
-<tr>
-<td width="35%" align="center">
-<a href="./assets/jev/android-grounding.png"><img src="./assets/jev/android-grounding.png" alt="安卓设备实际候选标注：区域编号对应设备点击位置" width="220"></a>
-</td>
-<td width="65%" valign="middle">
-<h3>秒级点击，毫秒级本地处理。</h3>
-<p>已有安卓实测，本地各环节均为毫秒级：</p>
-<ul>
-<li>截图采集：约<strong>160ms</strong></li>
-<li>控件读取：约<strong>240ms</strong></li>
-<li>候选标注与编码：<strong>15～50ms</strong></li>
-<li>点击执行：约<strong>160ms</strong></li>
-</ul>
-<p>不计模型请求，本地整轮中位耗时约<strong>620ms</strong>。</p>
-<p>定位、决策、执行连成一条快速通道，让连续操作的提速直接体现在手机上。</p>
-<p>左图为安卓设备的实际候选标注。性能记录见<a href="https://github.com/dongxinsuperman/jev-phone">Jev Phone</a>。</p>
-</td>
-</tr>
-</table>
-
-**7. 应用分发（三端通用）** —— 上传 APK / HAP / IPA，以及 iOS Simulator 使用的 `.app` / `.zip` 产物，按平台和设备类型筛出可分发设备，一键批量安装到设备池，实时回传每台安装结果、支持失败重试：
-
-![应用分发 · 三端上传包 → 选设备 → 批量安装 → 查看每台安装结果](./assets/screenshots/app-distribution.png)
-
----
-
-## 为什么选 ai-phone
-
-| 能力维度 | ai-phone 提供的 |
-|---|---|
-| **三端真机原生** | iOS（WDA / mjpeg passthrough）/ Android（adb + scrcpy）/ HarmonyOS（hdc + hypium）三端等价。鸿蒙作为一等公民与 iOS / Android 同等支持，在开源生态里少见 |
-| **调度队列 + 多设备并发** | `POST /api/submissions` 投递批次 → 实时按 `device_alias_pool` 分发到设备池 → Submission / Item TTL 兜底超时 → Kafka / Webhook 双通道终态广播 → HTML 报告自动落盘。设备占用锁 + readiness gate 防止派单到僵尸设备 |
-| **自然语言驱动** | `runContent: "打开设置并进入关于本机"` 直接喂给 VLM，不写 selector / xpath / 步骤脚本 |
-| **纯视觉决策** | 每步只看截图，不依赖 DOM / 控件树 / 无障碍服务，跨 App 跨平台不挑食 |
-| **辅助系统护城河** | 页面稳定后再决策；本地 pHash 卡死检测不烧 token；同坐标 / 同屏 / 震荡滑动自动召唤独立审判；before / after + 全步骤上下文做终局断言；结构化 / 自由对话自动分流 —— "VLM 是否真生效"不再是黑盒 |
-| **可监督轨迹缓存** | V1 固定动作回放、V2 状态路标对齐、V3 意图回放重定位；缓存复跑后仍走最终断言，失败会清理或标记可疑缓存；非业务瞬态弹窗可标记为 optional gate，当前没有同类弹窗时跳过，有同类弹窗时按需执行或修复 |
-| **三家协议自由组合** | 主 VLM 走 Doubao / Claude / GPT 三选一，辅助系统也可异家组合（如"主 Claude + 辅 Doubao 省成本"），全部走 env 切换、零代码改动 |
-| **执行器可插拔** | 默认内置自研 VLM 决策循环；前端"引擎"下拉框允许挂载第三方执行器作为额外选项，调度 / 报告 / 设备池 / 终态广播仍然走中台统一链路 |
-| **三端虚拟机** | iOS / Android / HarmonyOS 虚拟设备由 Server 统一配置并下发到 Agent；启动后带 `virtual` 标识进入统一设备池，复用真机的调度、工作台与执行链路（`main` 独有能力） |
-| **应用分发（三端）** | 上传 APK / HAP / IPA，以及 iOS Simulator 使用的 `.app` / `.zip` 产物，按平台和设备类型自动筛选并批量安装，实时回传每台安装结果，支持失败重试与超时兜底 |
-| **黑屏待机** | 三端支持空闲自然息屏省电，Run 前由 preflight 唤醒（Android `wake + dismiss-keyguard` / iOS `wda.unlock` / HarmonyOS `wake + 按需上滑`）；息屏态仍可派发 |
-| **快速部署** | 一台 Mac + Postgres + 一根数据线即可起完整链路；生产部署模板在 Roadmap 中持续补齐 |
-
-**典型用户**：
-
-- 中小型公司 QA 团队 —— 真机上做 AI 化的兼容性 / 回归 / 冒烟测试
-- 业务回归大盘想从"脚本维护"切到"自然语言投递"
-- 海外团队需要切 Claude / GPT 跑英文 App（改两个 env 即用）
-
----
-
-## 分支说明
-
-ai-phone 有两条同源、并行维护的架构线，底层架构区别在「VLM 决策执行脑放在哪」。两者**核心数据库 schema 与基础产品能力（三端 driver、调度队列、缓存 V1/V2/V3、报告、大盘、辅助安全层）兼容**；但**新增大功能优先（或仅）落地 `main`，两条线的功能完整度正在拉开** —— `main` 是推荐主线。
-
-> ⚠️ **两条线并非功能对等**：像 **iOS / Android / 鸿蒙三端虚拟机** 这类较新的大功能是 **`main` 独有、暂不同步 `next/server-brain`**。`next` 仍在维护、可继续使用，但会逐步落后于 `main`。**新接入请直接用 `main`。**
-
-| | `main`（默认主线） | `next/server-brain` |
-|---|---|---|
-| 架构 | **Distributed Agent Brain（分布式 Agent 大脑）** | **Server Brain（Server 大脑）** |
-| 执行脑 | VLM 决策循环在 **Agent 本地** 跑 | VLM 决策集中在 **Server** 跑 |
-| 配置 / 密钥 | Server 集中下发，Agent 不常驻模型密钥 | Server 集中持有 |
-| 缓存 V1/V2/V3 | Agent 本地回放 + 第一手归档回传，Server 薄存储 | Server 集中回放 + 归档 |
-| **独有大功能** | ✅ **iOS / Android / 鸿蒙三端虚拟机**，后续大功能优先落地 | ⚠️ 暂不同步 `main` 的新增大功能，逐步落后 |
-| 适合 | 多 Agent 分布执行、就近决策、Agent 侧算力可用、**需要虚拟机扩容** | 合规要求 Agent 不得持有模型出口、强集中管控 / 审计 |
-
-> **怎么选**：默认用 `main`（分布式 Agent 大脑，最新主线）。需要 **三端虚拟机等 `main` 独有能力**时只能用 `main`。仅当合规要求"Agent 不得持有模型能力、一切决策与密钥集中在 Server"时才选 `next/server-brain`。两条线**二选一部署**。
-
-> **怎么迁移（同库）**：两条线**数据库 schema 向前兼容**，`next/server-brain` 用户备份后可**同库增量升级**到 `main`，不需要新建库。**但同一时间只让一个架构连同一套库跑**（别让两个服务同时写一个库，会互相抢任务 / 覆盖设备池）。
-
-> **历史**：现在的 `main` 与老 `main`（Agent 大脑 v0.1.x 轻量版）同属 Agent 脑血脉，是它的现代化升级（执行脑仍在 Agent，新增 Server 集中配置 / 密钥 / 缓存薄管控）；v0.1.x 历史快照见 tag `archive/main-frozen-2026-05-30`。
-
-> **未来**：计划用配置开关把"Agent 脑 / Server 脑"两种执行模式统一回单一 `main`，届时 `next/server-brain` 合回主线。不过这只是当前计划，最终会参考多数用户的选择：如果 `next` 的使用者很少、或没有强需求，它也可能不再合回，而是直接被舍弃。
-
-> **轨迹缓存说明**：两条线都具备 VLM 成功轨迹缓存 / 回放能力，支持 `off` / `v1` / `v2` / `v3` 四种投递模式。轨迹回放对 case 的起跑状态、账号状态、设备状态、业务页面稳定性要求很高，建议只在业务起跑状态高度可控、重复执行稳定后按场景打开。用法见 [trajectory-cache-usage（轨迹缓存使用文档）](./docs/trajectory-cache-usage（轨迹缓存使用文档）.md)。
-
-架构细节：`main` 主线见 [agent-brain（分布式Agent大脑架构说明）](./docs/agent-brain（分布式Agent大脑架构说明）.md)；Server 大脑线见 [server-brain（Server大脑架构说明）](./docs/server-brain（Server大脑架构说明）.md)。
-
----
-
-## 30 秒上手
-
-```bash
-git clone https://github.com/dongxinsuperman/ai-phone.git
-cd ai-phone/backend
-cp .env.example .env  # 按注释填写 DB、Agent token、PHONE_VLM/AUX、Agent/WDA 等真实值
-python3.11 -m venv .venv && source .venv/bin/activate && pip install -e .
-
-# 终端 A：起 Server
-uvicorn ai_phone.server.app:app --host 0.0.0.0 --port 8000 --reload
-
-# 终端 B：起 Agent（接真机；本机开发可不传 server/token，走 .env）
-python -m ai_phone agent
-# 远端办公区电脑接入公司 Server 时：
-# python -m ai_phone agent --server http://<server-host>:8000 --token <AI_PHONE_AGENT_TOKEN>
-
-# 终端 C：起前端
-cd ../web && npm install && npm run dev
+```mermaid
+flowchart LR
+  UI[Compact Web UI] <-->|binary H.264 / events| S[Management Server]
+  UI -->|lease-checked continuous input| S
+  S <-->|authenticated Agent channel| N[Device node]
+  N --> A[Android scrcpy video + control]
+  N --> I[iOS WDA adapter]
+  N --> R[Native AI task runner]
 ```
 
-打开 <http://127.0.0.1:5180> → 选设备 → 进工作台 → 输入自然语言 goal → 看 VLM 跑。
+**当前 MVP 的媒体仍经过中央 Server 转发**，不是 WebRTC/P2P。跨地域浏览器直连节点、
+区域中继、完整多租户权限、鸿蒙实机验证属于后续工作。实际显示 FPS、解码队列与
+端到端延迟是不同指标；静态屏幕也不会一直产出满帧率。
 
-配置文件职责：
+## 开始使用
 
-```text
-backend/.env.defaults      项目默认策略，进 git，会被运行时读取
-backend/.env.example       用户填写指南，复制成 .env 后填真实部署值
-backend/.env.full.example  全量高级参数参考，不参与运行时加载
-backend/.env               用户真实配置，不进 git
-backend/.env.local         本机覆盖配置，不进 git
+需要 Python 3.11、Node.js 22+、PostgreSQL、ADB，以及已授权的 Android 设备。
+物理设备不要求 root。模拟器须由宿主提供硬件加速；iOS 真机另外需要 macOS、完整
+Xcode、签名与设备授权。
+
+完整步骤见 [部署与配置](docs/deployment.md)。原有 Python 包和环境变量保持 `ai_phone`
+与 `AI_PHONE_*` 名称以兼容已有节点；前端和产品版本从 DeviceDeck 0.1.0 开始。
+
+```sh
+cd backend
+python3.11 -m venv .venv
+.venv/bin/pip install -e '.[dev]'
+# 按部署文档准备私有 .env、数据库和浏览器登录配置
 ```
 
-> 新 Mac 从 0 到 1 完备部署请看 [deployment-from-zero（从0到1部署指南）](./docs/deployment-from-zero（从0到1部署指南）.md)。
-> 详细前置 / 数据库 / 调试参数请看 [getting-started（本地开发指南）](./docs/getting-started（本地开发指南）.md)。
-> iOS / HarmonyOS 接入需要额外配置，见 [ios-setup（iOS接入指南）](./docs/ios-setup（iOS接入指南）.md) 与 [harmony-setup（HarmonyOS接入指南）](./docs/harmony-setup（HarmonyOS接入指南）.md)。
-
----
-
-## 投递一条 case（最小示范）
-
-```bash
-curl -X POST http://localhost:8000/api/submissions \
-  -H 'Content-Type: application/json' \
-  -d '{
-    "submissionName": "demo-smoke",
-    "functionMapContext": "可选：设置首页有“关于本机”入口",
-    "items": [
-      {
-        "caseId": "demo_001",
-        "platforms": ["android"],
-        "runContent": "打开设置并进入关于本机"
-      }
-    ]
-  }'
+```sh
+cd web
+npm ci
+VITE_GATEWAY_AUTH=true npm run build
 ```
 
-`functionMapContext` 非必填：不传时，Agent 仍完整依靠任务、子步骤和当前截图执行。
-一旦提供，它会作为调用方为本次 Run 选定的高权重业务执行上下文，帮助模型更准确地
-识别页面、对象、入口、路径、测试数据和业务术语。Map 正文只在每个模型会话段的首条
-User 消息注入一次，不进入 System Prompt，也不进入 HTML 报告；它不能新增任务、跨越
-子步骤或改变完成条件。
+```sh
+cd backend
+.venv/bin/uvicorn --factory ai_phone.server.webapp:build_webapp --host 127.0.0.1 --port 8000
+```
 
-完整字段、错误码、Kafka / Webhook 回调格式见 [对外调用清单](./docs/external-api（对外调用清单）.md)。
+浏览器登录密码与 Agent 连接令牌分别配置；前端不嵌入服务令牌。生产入口使用 HTTPS，
+因为浏览器 WebCodecs 需要安全上下文。
 
-### 让 case 跑得更稳
+## 开发与验证
 
-AI PHONE 可以直接执行一句自然语言目标；但如果你要做业务回归、兼容性测试或批量投递，`runContent` 建议写成 **AI 可消费测试用例**：`测试标题 / 前置条件 / 操作步骤 / 预期结果` 四字段自洽，步骤单线，预期只保留一个核心断言。
+```sh
+cd web
+node --test tests/*.test.mjs
+npm run build
+```
 
-简短理解：case 不是写给人类 QA 补全上下文的提纲，而是写给 AI 执行器跑到底的脚本。
+```sh
+cd backend
+python -m pytest -q
+```
 
-写法指南见 [AI 可消费测试用例指南](./docs/ai-consumable-test-cases（AI可消费测试用例指南）.md)，完整方法论与 baseline skill 见 [ai-executable-case-pattern](https://github.com/dongxinsuperman/ai-executable-case-pattern)。
+设备集成测试与延迟工具应显式选定测试设备并持有它的锁。`tools/latency_target.py`
+是临时 LAN 测试页面，不随服务默认启动；测量结束后停止。
 
----
+- [产品需求](docs/prd/PRD-001-unified-device-platform/README.md)
+- [MVP 迭代](docs/iterations/0001-mvp/README.md)
+- [原上游 README](README.upstream.md)（用于兼容参考，原功能描述不代表全部已在本项目实机验收）
 
-## 当前状态
+## 来源与许可
 
-| 模块 | 状态 |
-|---|---|
-| 三端真机 driver + 镜像（iOS / Android / HarmonyOS） | ✅ 完整 |
-| 调度队列 + 设备池（Submission / Item TTL / 别名 / 锁 / readiness gate） | ✅ 完整 |
-| 终态广播（Kafka / Webhook / stdout 三选一） | ✅ 完整 |
-| 自包含 HTML 报告 + 运维大盘 | ✅ 完整 |
-| VLM 决策循环 + 执行安全层（页面稳定 / 卡死 / 审判 / 断言 / 状态路标 / 瞬态 UI gate） | ✅ 完整 |
-| 多协议适配（Doubao / Claude / GPT 自由组合） | ✅ 完整 |
-| 执行器可插拔（内置 VLM + Midscene 桥接） | ✅ 完整 |
-| iOS / Android / 鸿蒙三端虚拟机接入 + 全生命周期管理（`main` 独有） | ✅ 完整 |
-| 应用分发（上传包 / 批量安装 / 失败重试 / 超时兜底） | ✅ 完整 |
-| 黑屏待机（三端空闲息屏 + Run 前唤醒，息屏态可派发） | ✅ 完整 |
-
-## Roadmap
-
-- 双架构统一：用配置开关统一「Agent 脑（`main`）/ Server 脑（`next/server-brain`）」两种执行模式，逐步把 `next/server-brain` 合回单一 `main`
-- 鸿蒙本地 Headless：等待官方 Emulator 提供公开无窗口入口；获得并验收后，现有 Agent 链路直接切换，Server、数据库、端口、调度和设备池不变
-- 鸿蒙 Linux gRPC Provider：在取得并验证官方 Linux 模拟器交付物和协议后，新增 Server 直连的集中式无头资源池，与 Agent 链路并存
-- Server 多 Pod 化（M6）：Redis + 共享存储 + 分布式锁 / 调度 lease，支持多副本横向扩展（当前单 Pod 已满足，按需推进）
-- 历史回放页 / Case 加载对话框：API 就位，前端待补
-- 日志服务系统：统一收集、检索、保留策略
-- 生产部署模板：Docker Compose / K8s / Nginx / Ingress 示例
-- Webhook 安全增强：当前已支持 `callbackUrl` item 级 + submission 级终态回调，后续补公网集成的 HMAC 签名 / 验签示例
-
----
-
-## 维护与协作
-
-ai-phone 采用 **MIT License** 开源。Copyright (C) 2026 Dongxin and ai-phone contributors。官方默认主线是 `main`（分布式 Agent 大脑），新功能优先落地 `main`；`next/server-brain`（Server 大脑）作为并行架构线持续维护，但部分大功能（如 iOS / Android / 鸿蒙三端虚拟机）暂不同步。
-
-协作上优先使用 Issues / Discussions 交流问题、场景和设计取舍。Pull Request 可以提交，但不承诺 review、响应时效或合并；PR 更适合作为 bug 报告、设计参考或候选补丁。
-
-欢迎自由使用、修改、商用、分发、fork 后二次开发或长期维护自己的版本。基于本项目修改、分发或提供第三方版本时，请保留版权与 MIT License 声明，并保留必要的来源说明与第三方声明。
-
----
-
-## 文档导航
-
-| 文档 | 受众 | 内容 |
-|---|---|---|
-| [product-boundaries（产品边界）](./docs/product-boundaries（产品边界）.md) | 讨论者 / 集成方 / 二次开发者 | 项目出发点、产品边界，以及它和 AI 生成 case / CI / 测试平台的关系 |
-| [CHANGELOG](./CHANGELOG.md) | 部署者 / 维护者 | 版本变化与 [0.8.1 发布说明](./CHANGELOG.md#081) |
-| [features（使用功能介绍）](./docs/features（使用功能介绍）.md) | 调用方 / 业务同学 | 设备、队列、工作台、报告和[三端虚拟机启动姿态](./docs/features（使用功能介绍）.md#vm-startup-posture) |
-| [external-api（对外调用清单）](./docs/external-api（对外调用清单）.md) | 调用方 / CI 集成 | 当前 API 契约：投递 / 查询 / 取消 / Kafka / Webhook 完整字段 |
-| [ai-consumable-test-cases（AI可消费测试用例指南）](./docs/ai-consumable-test-cases（AI可消费测试用例指南）.md) | 调用方 / QA / AI 助手 | 如何把 `runContent` 写成更适合 AI PHONE 执行的四字段 case |
-| [architecture（架构设计）](./docs/architecture（架构设计）.md) | 二次开发者 | 系统架构：调度、三端链路、数据模型、终态广播（两条架构线的公共基座） |
-| [agent-brain（分布式Agent大脑架构说明）](./docs/agent-brain（分布式Agent大脑架构说明）.md) | 二次开发者 | `main` 主线：执行脑下沉 Agent、配置 / 密钥集中下发、缓存 Agent 本地回放 + Server 薄存储 |
-| [server-brain（Server大脑架构说明）](./docs/server-brain（Server大脑架构说明）.md) | 二次开发者 | `next/server-brain` 线：Server 集中决策 / 回放 / 归档 |
-| [deployment-from-zero（从0到1部署指南）](./docs/deployment-from-zero（从0到1部署指南）.md) | 部署者 / AI 助手 | 新 Mac 从 clone 到 Android / iOS / HarmonyOS 三端可执行的完整步骤、终端清单、自检和故障处理 |
-| [agent-deployment（Agent接入部署指南）](./docs/agent-deployment（Agent接入部署指南）.md) | 接机同事 / Agent 部署者 | 只部署 Agent 机器时需要的依赖、Server 连接、三端手机准备、启动命令和验收标准 |
-| [getting-started（本地开发指南）](./docs/getting-started（本地开发指南）.md) | 本地开发者 | 起后端 / 起 agent / 起前端、env 配置详解、FAQ |
-| [trajectory-cache-usage（轨迹缓存使用文档）](./docs/trajectory-cache-usage（轨迹缓存使用文档）.md) | 调用方 / 部署者 | `cacheMode=off/v1/v2/v3` 使用方式、状态路标、风险边界、推荐组合 |
-| [ios-setup（iOS接入指南）](./docs/ios-setup（iOS接入指南）.md) | iOS 接入者 | WDA / pmd3 / Xcode 自动续签 / iOS 17+ tunneld 按需流程 |
-| [harmony-setup（HarmonyOS接入指南）](./docs/harmony-setup（HarmonyOS接入指南）.md) | 鸿蒙接入者 | hdc / hmdriver2 / hypium 镜像后端切换 |
-| [android-vm-setup（安卓虚拟机接入与使用指南）](./docs/android-vm-setup（安卓虚拟机接入与使用指南）.md) | 虚拟机使用者 | `main` 独有：「虚拟机」页创建模拟器、机型 / 镜像口径、下发与生命周期 |
-| [agent-vm-env-setup（Agent虚拟机环境准备）](./docs/agent-vm-env-setup（Agent虚拟机环境准备）.md) | Agent 部署者 | 跑 Android Emulator 的宿主环境准备（JDK / SDK / 镜像矩阵，含 Windows 专章） |
-| [Agent iOS 虚拟机环境准备](<./docs/agent-ios-sim-vm-env-setup（Agent iOS虚拟机环境准备）.md>) | Agent 部署者 | iOS Simulator、WebDriverAgent 与 iPhone Duo 专用运行时 |
-| [agent-harmony-vm-env-setup（Agent鸿蒙虚拟机环境准备）](./docs/agent-harmony-vm-env-setup（Agent鸿蒙虚拟机环境准备）.md) | Agent 部署者 | 从零准备 DevEco Studio、按需下载鸿蒙镜像并让 Agent 承接虚拟机下发 |
-| [harmony-vm-architecture（鸿蒙虚拟机当前架构与演进规划）](./docs/harmony-vm-architecture（鸿蒙虚拟机当前架构与演进规划）.md) | 部署者 / 二次开发者 | Agent 有窗口与无窗口模式、Linux gRPC 资源池规划 |
-| [recommended-env（推荐部署Env清单）](./docs/recommended-env（推荐部署Env清单）.md) | 部署者 | iOS stable、Android/Harmony 黑屏待机推荐默认 |
-| [assistant-systems（辅助系统核心逻辑及效果）](./docs/assistant-systems（辅助系统核心逻辑及效果）.md) | 算法调优者 | 执行安全层：页面稳定、通道判定、卡死检测、审判、断言、状态路标、瞬态 UI gate |
-| [Midscene 执行器接入方案](./Midscene执行器接入方案.md) | 执行器扩展者 | 第三方执行器挂载方案 |
-| [安全说明](./SECURITY.md) | 部署者 / 集成者 | 鉴权边界、默认 token、网络隔离和漏洞报告方式 |
-| [贡献指南](./CONTRIBUTING.md) | 贡献者 | 本地开发、测试命令、PR 约定 |
-| [第三方声明](./THIRD_PARTY_NOTICES.md) | 法务 / 维护者 | 捆绑组件与主要依赖的许可证说明 |
-
----
-
-## 工程组成
-
-- `backend/`：Python 3.11（`pyproject.toml` 锁 `>=3.11,<3.13`），同一个包按启动参数切换 Server / Agent 角色
-- `web/`：Vue 3 + Vite 前端（**纯 JavaScript，无 TypeScript**）
-- `midscene-bridge/`：第三方执行器桥接子工程（独立 Node 工程，按需启用）
-
-> 发布源码包时建议使用 `git archive`，不要直接压缩本地工作目录；本地 `.env`、`.data/`、`node_modules/`、`dist/` 等运行产物都不应进入发布包。
-
----
-
-## 致谢
-
-三端能力栈站在巨人的肩膀上：
-
-- [scrcpy](https://github.com/Genymobile/scrcpy)（Android 镜像）
-- [WebDriverAgent](https://github.com/appium/WebDriverAgent)（iOS 控制）
-- [pymobiledevice3](https://github.com/doronz88/pymobiledevice3)（iOS 设备服务 / DVT 兜底）
-- [hmdriver2](https://github.com/codematrixer/hmdriver2)（HarmonyOS 控制）
-- [adbutils](https://github.com/openatx/adbutils)（Android 控制）
+项目代码沿用 MIT，保留 Dongxin 和 ai-phone contributors 的版权声明；新增代码同样
+采用 MIT。scrcpy、WebDriverAgent 等组件各自的许可与来源见
+[Third-Party Notices](THIRD_PARTY_NOTICES.md)。Android 的 packet/WebCodecs 实现使用
+现有 MIT scrcpy client 扩展，没有引入或复制 Webscreen 的 AGPL 代码。

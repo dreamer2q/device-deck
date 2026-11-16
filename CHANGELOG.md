@@ -2,7 +2,24 @@
 
 本文只记录会影响部署、接入或排障口径的工程变化；细粒度代码历史仍以 Git commit 为准。
 
-## Unreleased
+## DeviceDeck 0.1.0 MVP — 2026-11-17
+
+- Introduce DeviceDeck as an independent MIT downstream product with original
+  ai-phone attribution and history retained.
+- Add raw scrcpy H.264 access units over binary Agent/browser WebSockets and
+  bounded WebCodecs decoding, removing Android host transcoding and MP4 buffering.
+- Add continuous down/move/up with per-message ownership checks, expiry and
+  disconnect cancellation, rotation checks and stale-owner isolation.
+- Select the Android device encoder automatically and shut down sockets when
+  stopping a packet reader, allowing stream recovery without orphan readers.
+- Add free-device mirror pause/resume and an authenticated unified UI/API entry.
+- Preserve existing node/device/task/application/VM capabilities and iOS WDA.
+- Document the same-device 30-trial P95 comparison (1039.4ms → 95.6ms), with
+  synthetic-input/decoded-pixel boundaries and WAN/physical-scanout limitations.
+- Update web dependencies within their declared ranges and publish test/deploy
+  instructions. User acceptance and iOS signing remain separate from publication.
+
+## Inherited upstream / prior downstream unreleased history
 
 ### Downstream: compact console and bounded mirror playback
 

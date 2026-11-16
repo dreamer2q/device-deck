@@ -70,6 +70,7 @@ class Client:
         encoder_name: Optional[str] = None,
         codec_name: Optional[str] = None,
         server_jar: Optional[Union[str, Path]] = None,
+        packet_mode: bool = False,
     ) -> None:
         assert max_width >= 0
         assert bitrate >= 0
@@ -85,6 +86,7 @@ class Client:
         )
         assert codec_name in (None, "h264", "h265", "av1")
 
+        self.packet_mode = packet_mode
         self.flip = flip
         self.max_width = max_width
         self.bitrate = bitrate
@@ -140,10 +142,12 @@ class Client:
             f"max_size={self.max_width}",
             f"max_fps={self.max_fps}",
             f"video_bit_rate={self.bitrate}",
-            "video_encoder=" + (self.encoder_name or "OMX.google.h264.encoder"),
+            *(["video_encoder=" + self.encoder_name] if self.encoder_name else []),
             "video_codec=" + (self.codec_name or "h264"),
             "tunnel_forward=true",
-            "send_frame_meta=false",
+            "send_frame_meta=" + ("true" if self.packet_mode else "false"),
+            "send_codec_meta=" + ("true" if self.packet_mode else "false"),
+            *(["video_codec_options=i-frame-interval=1"] if self.packet_mode else []),
             "control=true",
             "audio=false",
             "show_touches=false",
@@ -174,7 +178,7 @@ class Client:
         else:
             raise ConnectionError("scrcpy-server 启动后未能在 3s 内建立视频通道")
 
-        dummy = self.__video_socket.recv(1)
+        dummy = self._read_exact(1)
         if not len(dummy) or dummy != b"\x00":
             raise ConnectionError("scrcpy 视频通道首字节异常")
 
@@ -183,7 +187,7 @@ class Client:
             Network.LOCAL_ABSTRACT, "scrcpy"
         )
         # 设备名（64 byte 定长）
-        name = self.__video_socket.recv(64).decode("utf-8", errors="ignore").rstrip("\x00")
+        name = self._read_exact(64).decode("utf-8", errors="ignore").rstrip("\x00")
         if not name:
             raise ConnectionError("scrcpy server 未返回 device_name")
         self.device_name = name
@@ -193,7 +197,13 @@ class Client:
         # 读那 4 byte 会把视频流前 4 byte 吞掉，导致首个 IDR 解码失败。
         # 这里直接跳过 → ``resolution`` 在收到首个解码帧时由 ``__stream_loop`` 写入。
         # 切非阻塞，loop 里靠 BlockingIOError 节流
-        self.__video_socket.setblocking(False)
+        if self.packet_mode:
+            codec, width, height = struct.unpack(">III", self._read_exact(12))
+            if codec != 0x68323634:
+                raise ValueError("Expected H.264 codec")
+            self.resolution = (width, height)
+        else:
+            self.__video_socket.setblocking(False)
 
     # ------------------------------------------------------------------ run
 
@@ -218,6 +228,10 @@ class Client:
         for sock in (self.control_socket, self.__video_socket):
             if sock is not None:
                 try:
+                    sock.shutdown(socket.SHUT_RDWR)
+                except OSError:
+                    pass
+                try:
                     sock.close()
                 except Exception:
                     pass
@@ -230,7 +244,30 @@ class Client:
         self.__video_socket = None
         self.__server_stream = None
 
+    def _read_exact(self, size):
+        chunks = bytearray()
+        while len(chunks) < size:
+            part = self.__video_socket.recv(size - len(chunks))
+            if not part:
+                raise ConnectionError("scrcpy socket closed")
+            chunks.extend(part)
+        return bytes(chunks)
+
     def __stream_loop(self) -> None:
+        if self.packet_mode:
+            try:
+                while self.alive:
+                    flags, size = struct.unpack(">QI", self._read_exact(12))
+                    if size > 8 * 1024 * 1024:
+                        raise ValueError("scrcpy packet too large")
+                    packet = self._read_exact(size)
+                    self.__send_to_listeners("packet", packet, flags & ((1 << 62) - 1),
+                        bool(flags & (1 << 63)), bool(flags & (1 << 62)))
+            except (OSError, ValueError, ConnectionError):
+                if self.alive:
+                    self.__send_to_listeners(EVENT_DISCONNECT)
+                self.stop()
+            return
         codec = CodecContext.create("h264", "r")
         while self.alive:
             try:

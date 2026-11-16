@@ -1,15 +1,21 @@
 # Security Policy
 
-ai-phone controls real mobile devices and can execute actions inside apps. Treat the
+DeviceDeck controls real mobile devices and can execute actions inside apps. Treat the
 server, agent, database, reports, and device network as trusted infrastructure.
 
 ## Supported Versions
 
-Security fixes are handled on the latest official default branch until the
+Security fixes are handled on the latest DeviceDeck default branch until the
 project starts publishing versioned releases. After tagged releases are
 introduced, this section will list the supported release line explicitly.
 
 ## Deployment Guidance
+
+Use `ai_phone.server.webapp:build_webapp` for the authenticated unified entry.
+The lower-level inherited API factory does not itself authenticate every browser
+route. Device leases provide mutual exclusion, not multi-tenant authorization.
+Keep one central worker while lock/channel state is in memory.
+
 
 - Do not expose the backend directly to the public internet.
 - Put the service behind VPN, private network routing, a zero-trust gateway, or

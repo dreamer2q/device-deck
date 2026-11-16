@@ -189,6 +189,8 @@ async def create_run(
     store: DeviceLockStore = LockStoreDep,
     hub: Hub = HubDep,
 ) -> Dict[str, Any]:
+    if hub.mirror_paused(body.device_serial):
+        raise HTTPException(409, "设备镜像正在临时维护")
     dev = await session.get(Device, body.device_serial)
     if dev is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="device not found")

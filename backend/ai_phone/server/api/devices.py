@@ -367,13 +367,31 @@ async def uninstall_app(
 # ---------------------------------------------------------------------------
 # 占用锁
 # ---------------------------------------------------------------------------
+class MirrorMaintenanceReq(BaseModel):
+    paused: bool
+
+
+@router.post("/{serial}/mirror-maintenance")
+async def mirror_maintenance(serial: str, body: MirrorMaintenanceReq,
+    session: AsyncSession = DBSession, store: DeviceLockStore = LockStoreDep, hub: Hub = HubDep):
+    if await session.get(Device, serial) is None:
+        raise HTTPException(404, "device not found")
+    if store.peek(serial) is not None:
+        raise HTTPException(409, "请先释放设备控制权，再暂停或恢复镜像")
+    await hub.pause_mirror(serial, body.paused)
+    return {"paused": body.paused}
+
+
 @router.post("/{serial}/lock", status_code=status.HTTP_201_CREATED)
 async def acquire_lock(
     serial: str,
     body: LockAcquireReq,
     session: AsyncSession = DBSession,
     store: DeviceLockStore = LockStoreDep,
+    hub: Hub = HubDep,
 ) -> Dict[str, Any]:
+    if hub.mirror_paused(serial):
+        raise HTTPException(409, "设备镜像正在临时维护")
     dev = await session.get(Device, serial)
     if dev is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="device not found")

@@ -1898,6 +1898,14 @@ async def _handle_input(
     if not serial or not kind:
         logger.warning("input 参数不全 | serial={} kind={}", serial, kind)
         return
+    if kind == "realtime_touch":
+        session = mirror_sup.get_session(serial) if mirror_sup else None
+        if session is None or not hasattr(session, "touch"):
+            return
+        await asyncio.to_thread(session.touch, params.get("phase"),
+            params.get("x", 0), params.get("y", 0), params.get("width", 0),
+            params.get("height", 0), params.get("stream_id", ""), params.get("owner"))
+        return
     try:
         platform_name = _serial_platform.get(serial, "android")
         if platform_name == "harmony" and get_settings().harmony_wake_on_enter:
@@ -3155,7 +3163,12 @@ class _MirrorSupervisor:
             session = _HarmonyMirrorSession(serial, self._ws, self._get_loop())
         else:
             stream_id = (refresh_stream_id or uuid.uuid4().hex) if _serial_vm_ids.get(serial) else ""
-            session = _MirrorSession(serial, self._ws, self._get_loop(), stream_id=stream_id)
+            if os.environ.get("DEVICE_DECK_RAW_MIRROR", "0") == "1":
+                from .mirror.raw import RawMirrorSession
+                session = RawMirrorSession(serial, self._ws, self._get_loop(),
+                    stream_id=stream_id, params=_scrcpy_mirror_params())
+            else:
+                session = _MirrorSession(serial, self._ws, self._get_loop(), stream_id=stream_id)
         session.start()
         # 启动失败的 session 直接丢弃，下次 start 会重试，不在 _sessions 里留坏会话
         if getattr(session, "_stopped", False):

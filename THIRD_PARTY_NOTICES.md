@@ -1,5 +1,19 @@
 # Third-Party Notices
 
+## DeviceDeck origin
+
+DeviceDeck derives from dongxinsuperman/ai-phone and the dreamer2q compact fork
+at commit `497ec18b48a9ff63a522f3b652f1d27e385e3ba6`. Their original MIT copyright
+notice and Git history are retained. DeviceDeck's Android packet transport,
+continuous input, authenticated web entry and product additions are downstream
+changes, not an official ai-phone release.
+
+The vendored Python scrcpy client in `backend/ai_phone/agent/scrcpy_client/`
+originates from [leng-yue/py-scrcpy-client](https://github.com/leng-yue/py-scrcpy-client)
+(MIT); existing source attribution remains and the license text is in
+`third_party/licenses/LICENSE.py-scrcpy-client.txt`. The packet-mode extension uses the
+bundled scrcpy 2.4 protocol. No Webscreen code is bundled in this MVP.
+
 This file summarizes bundled third-party components and notable optional
 dependencies used by ai-phone. Each component remains under its own license.
 When updating a vendored component or binary, update this file and keep the
