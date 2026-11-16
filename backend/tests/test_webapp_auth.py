@@ -8,7 +8,8 @@ from ai_phone.server.webapp import BrowserAuth
 
 def test_auth_protects_http_websocket_and_keeps_internal_token_server_side():
     app = FastAPI()
-    app.add_middleware(BrowserAuth, username="tester", password="test-password-123", internal_token="test-machine-token")
+    app.add_middleware(BrowserAuth, username="tester", password="test-password-123",
+        internal_token="test-machine-token", agent_token="separate-agent-token")
     @app.get("/api/internal/echo")
     def echo(request: Request):
         # An isolated test endpoint, not installed in the production application.
@@ -23,6 +24,10 @@ def test_auth_protects_http_websocket_and_keeps_internal_token_server_side():
         assert client.get("/api/internal/echo").status_code == 401
         assert client.get("/api/internal/echo", auth=("tester", "wrong")).status_code == 401
         assert client.get("/api/internal/echo", auth=("tester", "test-password-123")).json() == {"internal_authorized": True}
+        # The outer guard allows node HTTP traffic but does not rewrite its
+        # identity into the more privileged internal API credential.
+        assert client.get("/api/internal/echo", headers={"Authorization": "Bearer separate-agent-token"}).json() == {"internal_authorized": False}
+        assert client.get("/api/internal/echo", headers={"Authorization": "Bearer test-machine-token"}).json() == {"internal_authorized": True}
         with client.websocket_connect("/ws/agent") as ws:
             assert ws.receive_text() == "separate-agent-token-guard"
         header = "Basic " + base64.b64encode(b"tester:test-password-123").decode()

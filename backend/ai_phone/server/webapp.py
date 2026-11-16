@@ -22,10 +22,11 @@ from .app import create_app  # noqa: E402
 
 
 class BrowserAuth:
-    def __init__(self, app, *, username, password, internal_token):
+    def __init__(self, app, *, username, password, internal_token, agent_token=None):
         if not username or len(password) < 12 or not internal_token or internal_token == "dev":
             raise RuntimeError("Set DEVICE_DECK_USERNAME, DEVICE_DECK_PASSWORD (12+ chars) and a private Agent token")
         self.app, self.username, self.password, self.internal_token = app, username, password, internal_token
+        self.agent_token = agent_token
 
     async def __call__(self, scope, receive, send):
         if scope["type"] not in {"http", "websocket"} or scope.get("path") == "/ws/agent":
@@ -33,15 +34,18 @@ class BrowserAuth:
         headers = dict(scope.get("headers", []))
         auth = headers.get(b"authorization", b"").decode("latin1")
         valid = False
+        browser = False
         if auth.startswith("Basic "):
             try:
                 value = base64.b64decode(auth[6:], validate=True).decode("utf-8")
                 username, password = value.split(":", 1)
                 valid = secrets.compare_digest(username.encode(), self.username.encode()) and secrets.compare_digest(password.encode(), self.password.encode())
+                browser = valid
             except (ValueError, UnicodeError):
                 pass
         elif auth.startswith("Bearer "):
-            valid = secrets.compare_digest(auth[7:].encode(), self.internal_token.encode())
+            valid = any(secrets.compare_digest(auth[7:].encode(), token.encode())
+                for token in (self.internal_token, self.agent_token) if token)
         if not valid:
             if scope["type"] == "websocket":
                 await send({"type": "websocket.close", "code": 4401})
@@ -49,7 +53,9 @@ class BrowserAuth:
             response = Response("Authentication required", status_code=401,
                 headers={"WWW-Authenticate": 'Basic realm="DeviceDeck", charset="UTF-8"'})
             return await response(scope, receive, send)
-        if scope.get("path", "").startswith("/api/internal/"):
+        # Preserve machine bearer identity: an Agent's token must never be
+        # promoted into a different privileged internal token by this gateway.
+        if browser and scope.get("path", "").startswith("/api/internal/"):
             scope = {**scope, "headers": [(k, v) for k, v in scope.get("headers", [])
                 if k.lower() != b"authorization"] + [(b"authorization", ("Bearer " + self.internal_token).encode())]}
         await self.app(scope, receive, send)
@@ -71,7 +77,8 @@ def build_webapp():
     app.title = "DeviceDeck"
     app.add_middleware(BrowserAuth, username=os.environ.get("DEVICE_DECK_USERNAME", ""),
         password=os.environ.get("DEVICE_DECK_PASSWORD", ""),
-        internal_token=settings.submission_internal_token or settings.agent_token)
+        internal_token=settings.submission_internal_token or settings.agent_token,
+        agent_token=settings.agent_token)
     dist = Path(os.environ.get("DEVICE_DECK_WEB_DIST", str(Path(__file__).resolve().parents[3] / "web/dist")))
     if not (dist / "index.html").is_file():
         raise RuntimeError("Build web/ first or set DEVICE_DECK_WEB_DIST")
