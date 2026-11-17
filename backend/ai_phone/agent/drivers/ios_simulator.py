@@ -30,6 +30,7 @@ from loguru import logger
 from .base import DeviceInfo
 from .simctl import (
     SimulatorDevice,
+    SimulatorScan,
     device_type_names,
     device_type_screens,
     list_simulators,
@@ -180,9 +181,9 @@ def list_ios_simulators(
         # 底座已经 fail-closed，这里是第二道保险：宁可少报设备，也绝不让异常
         # 冒泡到三端公用的扫描链路。
         logger.warning("iOS 虚拟机扫描出现未预期错误（本轮按无设备处理）：{}", exc)
-        return []
+        return SimulatorScan(complete=False)
 
-    infos: List[DeviceInfo] = []
+    infos = SimulatorScan(complete=getattr(sims, "complete", True))
     for sim in sims:
         # runtime 未安装的机型模板压根启动不了，不是一台设备，任何情况下都不上报
         if not sim.is_available:
@@ -195,5 +196,6 @@ def list_ios_simulators(
         try:
             infos.append(_to_device_info(sim))
         except Exception as exc:  # noqa: BLE001
+            infos.complete = False
             logger.warning("iOS 虚拟机 {} 信息转换失败，跳过：{}", sim.udid, exc)
     return infos

@@ -190,6 +190,17 @@ def test_list_swallows_simctl_error(monkeypatch):
     assert simctl_mod.list_simulators() == []
 
 
+@pytest.mark.parametrize("raw", ["", "not-json", "[]", "{}", '{"devices":null}'])
+def test_failed_discovery_is_distinct_from_confirmed_empty_inventory(monkeypatch, raw):
+    _patch(monkeypatch, run=lambda *a, **k: raw)
+    result = simctl_mod.list_simulators()
+    assert result == []
+    assert result.complete is False
+    _patch(monkeypatch, run=lambda *a, **k: '{"devices":{}}')
+    assert simctl_mod.list_simulators() == []
+    assert getattr(simctl_mod.list_simulators(), "complete", True) is True
+
+
 def test_list_swallows_invalid_json(monkeypatch):
     _patch(monkeypatch, run=lambda *a, **k: "not json at all")
     assert simctl_mod.list_simulators() == []

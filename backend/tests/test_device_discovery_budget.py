@@ -5,6 +5,7 @@ import pytest
 
 from ai_phone.agent import drivers
 from ai_phone.agent.drivers.base import DeviceInfo
+from ai_phone.agent.drivers.simctl import SimulatorScan
 
 
 @pytest.fixture(autouse=True)
@@ -89,6 +90,17 @@ def test_failed_scan_is_unknown_not_an_empty_success(monkeypatch):
     monkeypatch.setattr(drivers, "list_harmony_devices", failed)
     assert [d.serial for d in drivers.list_all_devices()] == ["H1"]
     assert drivers.was_last_device_scan_ok("harmony") is False
+
+
+def test_incomplete_simulator_scan_retains_identity_until_a_complete_scan_confirms_removal(monkeypatch):
+    previous = DeviceInfo(serial="S1", platform="ios_sim")
+    drivers._SCAN_LAST[("ios_sim", False)] = [previous]
+    monkeypatch.setattr(drivers, "list_ios_simulators", lambda **_: SimulatorScan(complete=False))
+    assert drivers.list_all_devices() == [previous]
+    assert drivers.was_last_device_scan_ok("ios_sim") is False
+    monkeypatch.setattr(drivers, "list_ios_simulators", lambda **_: [])
+    assert drivers.list_all_devices() == []
+    assert drivers.was_last_device_scan_ok("ios_sim") is True
 
 
 def test_alternate_scan_options_do_not_duplicate_a_hung_platform(monkeypatch):

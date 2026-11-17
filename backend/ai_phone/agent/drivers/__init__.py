@@ -147,8 +147,11 @@ def list_all_devices(include_offline: bool = False) -> List[DeviceInfo]:
             if pending.done():
                 _SCAN_PENDING.pop(platform)
                 try:
-                    _SCAN_LAST[(platform, pending_offline)] = list(pending.result())
-                    _SCAN_OK[platform] = pending_offline == include_offline
+                    result = pending.result()
+                    complete = getattr(result, "complete", True)
+                    if complete:
+                        _SCAN_LAST[(platform, pending_offline)] = list(result)
+                    _SCAN_OK[platform] = complete and pending_offline == include_offline
                 except Exception as exc:  # noqa: BLE001
                     _SCAN_OK[platform] = False
                     logger.warning("{} 设备扫描失败，暂留上次快照：{}", platform, exc)

@@ -244,6 +244,19 @@ def test_empty_when_no_simulators(monkeypatch):
     assert sim_mod.list_ios_simulators(managed_only=False) == []
 
 
+def test_missing_lcd_marks_scan_incomplete_instead_of_confirming_unplug(monkeypatch):
+    _patch(monkeypatch, [_sim()])
+    monkeypatch.setattr(sim_mod, "simulator_screen", lambda _: None)
+    result = sim_mod.list_ios_simulators(managed_only=False)
+    assert result == []
+    assert result.complete is False
+
+
+def test_simctl_failure_marker_survives_discovery_conversion(monkeypatch):
+    monkeypatch.setattr(sim_mod, "list_simulators", lambda: sim_mod.SimulatorScan(complete=False))
+    assert sim_mod.list_ios_simulators(managed_only=False).complete is False
+
+
 # --------------------------------------------------------------------------
 # 没有纳管实例的宿主：必须与本能力上线前完全等价，一次 simctl 都不许 fork
 # --------------------------------------------------------------------------

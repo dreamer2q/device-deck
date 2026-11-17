@@ -493,6 +493,14 @@ def parse_devices_json(
     return out
 
 
+class SimulatorScan(list):
+    """List-compatible result: incomplete discovery cannot prove a device was removed."""
+
+    def __init__(self, values=(), *, complete: bool = True):
+        super().__init__(values)
+        self.complete = complete
+
+
 def list_simulators(booted_only: bool = False) -> List[SimulatorDevice]:
     """列出本机的 iOS 虚拟机。**任何失败都返回空列表，绝不抛异常。**
 
@@ -512,17 +520,19 @@ def list_simulators(booted_only: bool = False) -> List[SimulatorDevice]:
         payload = json.loads(raw) if raw else {}
         if not isinstance(payload, dict):
             logger.debug("simctl list devices 返回了非对象 JSON，忽略本轮")
-            return []
+            return SimulatorScan(complete=False)
+        if not isinstance(payload.get("devices"), dict):
+            return SimulatorScan(complete=False)
         devices = parse_devices_json(payload, _get_runtimes())
     except SimctlError as exc:
         logger.debug("simctl 扫描失败（本轮按无虚拟机处理）：{}", exc)
-        return []
+        return SimulatorScan(complete=False)
     except json.JSONDecodeError as exc:
         logger.debug("simctl list devices 输出不是合法 JSON（本轮忽略）：{}", exc)
-        return []
+        return SimulatorScan(complete=False)
     except Exception as exc:  # noqa: BLE001
         logger.warning("simctl 扫描出现未预期错误（本轮按无虚拟机处理）：{}", exc)
-        return []
+        return SimulatorScan(complete=False)
 
     if booted_only:
         devices = [d for d in devices if d.is_booted]

@@ -1,5 +1,5 @@
 <script setup>
-import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import {
   COLUMN_GUTTER, DEFAULT_MIRROR_RATIOS, WORKBENCH_LAYOUT_KEY,
@@ -42,6 +42,10 @@ const devicePixel = ref({ w: 0, h: 0 })
 const tapBusy = ref(false)
 // 进入页面抢锁的结果：null=还没试/成功进入，非 null 就是被占用时要展示给用户的信息
 const blocked = ref(null)
+const entered = ref(false)
+const entryError = ref('')
+let mounted = false
+let entering = false
 const FUNCTION_MAP_FILE_EXTS = ['txt', 'md', 'json', 'csv', 'yaml', 'yml', 'log']
 const FUNCTION_MAP_FILE_ACCEPT = FUNCTION_MAP_FILE_EXTS.map(ext => `.${ext}`).join(',')
 const FUNCTION_MAP_SUPPORTED_FORMATS = FUNCTION_MAP_FILE_EXTS.map(ext => `.${ext}`).join(' / ')
@@ -442,7 +446,7 @@ const androidMirrorReady = computed(() => {
     && frame.width === frameSize.value.w && frame.height === frameSize.value.h
     && (!expected || (expected.id ? frame.stream_id === expected.id : frame.stream_id !== expected.previous))
 })
-const canSendInput = computed(() => !lock.readonly.value && !nativeDisplayBusy.value && !waitingForNativeFrame.value && (
+const canSendInput = computed(() => !!lock.token.value && !lock.readonly.value && !nativeDisplayBusy.value && !waitingForNativeFrame.value && (
   !(androidVmId.value || androidMirror.value) || (androidMirrorReady.value && !displayBusy.value)
 ) && (!duoVm.value || (mirrorReady.value && !!nativeDisplay.value?.width && !!duoFrameRotation.value)))
 const canChangeDisplay = computed(() => canSendInput.value && wsConnected.value
@@ -1130,6 +1134,7 @@ function clearLogs() {
 }
 
 onMounted(async () => {
+  mounted = true
   // 拉一次后端功能开关：是否暴露 Midscene 引擎下拉框等
   // 失败不阻塞主流程；缺省按"全部关闭"渲染
   api.getConfig()
@@ -1149,75 +1154,98 @@ onMounted(async () => {
     })
 
   await refreshDevice()
-  // 先抢锁：409 意味着别的 tab / job 已占用，按"报错拦截"方案渲染提示页，不开 WS
-  const info = await lock.acquire()
-  if (info === null) {
-    // 拉一次最新锁信息给用户看是谁在用
-    try {
-      const d = await api.getDevice(serial.value)
-      const lk = d?.lock
-      blocked.value = {
-        holder: lk?.holder || '未知',
-        holder_type: lk?.holder_type || '未知',
-        message: lock.error.value || '设备已被占用',
-      }
-    } catch {
-      blocked.value = {
-        holder: '未知',
-        holder_type: '未知',
-        message: lock.error.value || '设备已被占用',
-      }
-    }
-    return
-  }
-  // 监听视频/图像帧尺寸变化（设备旋转 / 第一帧到达）：只更新画面方向与
-  // 坐标映射，不再自动改镜像外框尺寸，避免右侧日志被横竖屏变化带着抖。
-  // <video>: loadedmetadata + resize（videoWidth/Height 变就 fire）
-  // <img>:   load（每次 src 切换都 fire，JPEG passthrough 每帧都会触发）
-  //          load 频率虽然高，但 _onVideoSizeChange 内部做了 lastIsLandscape
-  //          去重，只在方向变化时刷新设备尺寸，代价极低
-  if (videoEl.value) {
-    videoEl.value.addEventListener('loadedmetadata', _onVideoSizeChange)
-    videoEl.value.addEventListener('resize', _onVideoSizeChange)
-  }
-  if (imgEl.value) {
-    imgEl.value.addEventListener('load', _onVideoSizeChange)
-  }
-  window.addEventListener('resize', onViewportResize)
-  window.addEventListener('blur', onMirrorPointerCancel)
-  if (layoutEl.value && typeof ResizeObserver !== 'undefined') {
-    layoutObserver = new ResizeObserver(onViewportResize)
-    layoutObserver.observe(layoutEl.value)
-  }
-  onViewportResize()
-  sub = openDeviceStream(serial.value, {
-    onMessage,
-    onOpen: () => {
-      wsConnected.value = true
-      pushLog({ level: 1, title: 'WS 连接', content: 'connected', timestamp: Date.now() / 1000 })
-    },
-    onClose: () => {
-      wsConnected.value = false
-      gesture.active = false
-      rawPlayer.reset()
-      rawReady.value = false
-      if (duoVm.value) {
-        jpegMirror.reset()
-        frameSize.value = { w: 0, h: 0 }
-      }
-      if (androidMirror.value) {
-        androidFrameReady.value = false
-        if (expectedMirror.value) expectedMirror.value = { previous: expectedMirror.value.previous }
-        androidMirror.value = null
-        mirror.reset()
-      }
-      pushLog({ level: 2, title: 'WS 连接', content: 'disconnected, 自动重连中', timestamp: Date.now() / 1000 })
-    },
-  })
-  deviceTimer = setInterval(refreshDevice, 4000)
+  await enterWorkbench()
 })
 
+async function enterWorkbench() {
+  if (!mounted || entered.value || entering) return
+  entering = true
+  entryError.value = ''
+  try {
+    // 先抢锁：409 意味着别的 tab / job 已占用，按"报错拦截"方案渲染提示页，不开 WS
+    const info = lock.token.value ? { token: lock.token.value } : await lock.acquire()
+    if (info === null) {
+      // Hidden tabs defer acquisition; that is not evidence that another client owns the device.
+      if (!lock.readonly.value) return
+      // 拉一次最新锁信息给用户看是谁在用
+      try {
+        const d = await api.getDevice(serial.value)
+        const lk = d?.lock
+        blocked.value = {
+          holder: lk?.holder || '未知',
+          holder_type: lk?.holder_type || '未知',
+          message: lock.error.value || '设备已被占用',
+        }
+      } catch {
+        blocked.value = {
+          holder: '未知',
+          holder_type: '未知',
+          message: lock.error.value || '设备已被占用',
+        }
+      }
+      return
+    }
+    if (!mounted) return
+    blocked.value = null
+    entered.value = true
+    await nextTick()
+    // 监听视频/图像帧尺寸变化（设备旋转 / 第一帧到达）：只更新画面方向与
+    // 坐标映射，不再自动改镜像外框尺寸，避免右侧日志被横竖屏变化带着抖。
+    // <video>: loadedmetadata + resize（videoWidth/Height 变就 fire）
+    // <img>:   load（每次 src 切换都 fire，JPEG passthrough 每帧都会触发）
+    //          load 频率虽然高，但 _onVideoSizeChange 内部做了 lastIsLandscape
+    //          去重，只在方向变化时刷新设备尺寸，代价极低
+    if (videoEl.value) {
+      videoEl.value.addEventListener('loadedmetadata', _onVideoSizeChange)
+      videoEl.value.addEventListener('resize', _onVideoSizeChange)
+    }
+    if (imgEl.value) {
+      imgEl.value.addEventListener('load', _onVideoSizeChange)
+    }
+    window.addEventListener('resize', onViewportResize)
+    window.addEventListener('blur', onMirrorPointerCancel)
+    if (layoutEl.value && typeof ResizeObserver !== 'undefined') {
+      layoutObserver = new ResizeObserver(onViewportResize)
+      layoutObserver.observe(layoutEl.value)
+    }
+    onViewportResize()
+    sub = openDeviceStream(serial.value, {
+      onMessage,
+      onOpen: () => {
+        wsConnected.value = true
+        pushLog({ level: 1, title: 'WS 连接', content: 'connected', timestamp: Date.now() / 1000 })
+      },
+      onClose: () => {
+        wsConnected.value = false
+        gesture.active = false
+        rawPlayer.reset()
+        rawReady.value = false
+        if (duoVm.value) {
+          jpegMirror.reset()
+          frameSize.value = { w: 0, h: 0 }
+        }
+        if (androidMirror.value) {
+          androidFrameReady.value = false
+          if (expectedMirror.value) expectedMirror.value = { previous: expectedMirror.value.previous }
+          androidMirror.value = null
+          mirror.reset()
+        }
+        pushLog({ level: 2, title: 'WS 连接', content: 'disconnected, 自动重连中', timestamp: Date.now() / 1000 })
+      },
+    })
+    deviceTimer = setInterval(refreshDevice, 4000)
+  } catch (e) {
+    entryError.value = e.detail?.message || e.detail || e.message || '连接失败'
+  } finally {
+    entering = false
+  }
+}
+
+// useDeviceLock recovers on visibility/focus. Resume initialization as soon as it owns a lease.
+watch(lock.token, token => { if (token) enterWorkbench() })
+
 onBeforeUnmount(() => {
+  mounted = false
   onMirrorPointerCancel()
   rawPlayer.reset()
   window.removeEventListener("blur", onMirrorPointerCancel)
@@ -1259,6 +1287,17 @@ watch(
       <p class="b-tip">{{ blocked.message }}</p>
       <div class="b-actions">
         <router-link to="/" class="b-btn primary">← 返回设备列表</router-link>
+      </div>
+    </div>
+  </section>
+  <section class="work" v-else-if="!entered">
+    <div class="blocked-card" role="status">
+      <h2>{{ entryError ? '连接设备失败' : '等待连接设备' }}</h2>
+      <p class="b-serial">{{ serial }}</p>
+      <p class="b-tip">{{ entryError || '页面回到前台后自动连接；连接成功前不会发送设备操作。' }}</p>
+      <div class="b-actions">
+        <button v-if="entryError" type="button" class="b-btn primary" @click="enterWorkbench">重试</button>
+        <router-link to="/" class="b-btn">← 返回设备列表</router-link>
       </div>
     </div>
   </section>

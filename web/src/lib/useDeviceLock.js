@@ -75,7 +75,6 @@ export function useDeviceLock(serial, { holder, onKicked } = {}) {
     if (recovering) return recovering
     recovering = (async () => {
       if (!_pageVisible()) {
-        readonly.value = true
         error.value = '页面不在前台，暂停设备控制权恢复'
         return false
       }
