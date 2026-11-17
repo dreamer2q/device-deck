@@ -150,7 +150,9 @@ function chooseInitialCatalogValues() {
 
 function selectFamily(family) {
   form.family = family
-  applyDeviceType(deviceTypesForFamily.value[0])
+  const installedOrder = selectedHost.value?.environment?.device_types || []
+  const preferred = installedOrder.map(t => deviceTypesForFamily.value.find(dt => dt.identifier === t.identifier)).find(Boolean)
+  applyDeviceType(preferred || deviceTypesForFamily.value[0])
 }
 
 function applyDeviceType(dt) {
@@ -195,6 +197,7 @@ async function loadCatalog() {
       catalogErr.value = 'Server 尚未导入 iOS 模拟器官方机型目录'
     }
     if (!selectedDeviceType.value) chooseInitialCatalogValues()
+    else applyDeviceType(selectedDeviceType.value)
   } catch (e) {
     catalogErr.value = prettyErr(e)
   } finally {
