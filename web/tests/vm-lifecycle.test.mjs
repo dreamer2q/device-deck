@@ -71,6 +71,23 @@ function deferred() {
   return { promise, resolve, reject }
 }
 
+test('ios: repeated create while POST is pending submits only one configuration', async () => {
+  const gate = deferred()
+  let creates = 0
+  const created = { id: 'one', lifecycle: LIFE.draft }
+  const page = loadPage('IosSimVirtualMachines.vue', 'iosSimVms', {
+    create: async () => { creates++; return gate.promise },
+    list: async () => [created],
+  })
+  Object.assign(page.form, { alias: 'single', device_type: 'test-iPhone', runtime: 'test-iOS' })
+  const first = page.createVm()
+  await page.createVm()
+  assert.equal(creates, 1)
+  gate.resolve(created)
+  await first
+  assert.equal(creates, 1)
+})
+
 function probeStreams() {
   const calls = []
   return {

@@ -211,6 +211,7 @@ async function refresh() {
 }
 
 async function createVm() {
+  if (busyId.value === 'create') return
   if (!form.alias.trim()) {
     err.value = '设备别名必填'
     return
