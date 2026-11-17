@@ -367,7 +367,9 @@ async def reject_start_preflight(session, vm, hub, message: str, *, reason: str 
     record_failure(vm, message, reason=reason, action="start", request_id=request_id, preflight=True)
     vm.error_message = message
     if hasattr(vm, "error_code"):
-        vm.error_code = reason
+        # Native inspection can append a command/timeout diagnostic to its reason.
+        # Keep that full detail in runtime/error_message, not the VARCHAR(128) code.
+        vm.error_code = reason.split(":", 1)[0][:128]
     await session.commit()
     raise HTTPException(409, operation_failure_detail(vm, message, request_id=request_id, hub=hub, reason=reason))
 

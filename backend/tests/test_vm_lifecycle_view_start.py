@@ -178,6 +178,31 @@ async def test_unknown_start_inspects_outside_lock_then_starts_existing_instance
 
 
 @pytest.mark.asyncio
+async def test_long_inspection_diagnostic_stays_a_conflict_with_a_bounded_code(view_context, monkeypatch):
+    context = view_context
+    vm_id = await bound_unknown(context)
+    install_inspection(context, monkeypatch, state="unknown")
+    waiter = context.platform.api.get_capability_waiter()
+    reason = "instance_list_failed:" + "native timeout diagnostic " * 30
+
+    async def inspect(**kwargs):
+        observation = observation_for(kwargs["vm"], state="unknown")
+        observation["reason"] = reason
+        return {"ok": False, "request_id": "long-diagnostic", "details": {"instance_observation": observation}}
+
+    waiter.inspect_agent = inspect
+    response = await context.client.post(f"{context.platform.base}/{vm_id}/start", headers=AUTH)
+    assert response.status_code == 409, response.text
+    assert context.hub.sent == []
+    async with db.get_session_factory()() as session:
+        vm = await session.get(context.platform.model, vm_id)
+        if hasattr(vm, "error_code"):
+            assert vm.error_code == "instance_list_failed"
+        assert reason in vm.error_message
+        assert runtime(vm)["instance_observation"]["reason"] == reason
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("native_state", ["running", "missing", "unknown"])
 async def test_unknown_start_refuses_non_stopped_without_native_commands(view_context, monkeypatch, native_state):
     context = view_context
