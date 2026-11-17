@@ -108,6 +108,7 @@ def _startup_timeout(deadline: Optional[float], maximum: float) -> float:
 
 def _register_wda_endpoint(
     udid: str, wda_port: int, mjpeg_port: int, duo: Optional[DuoControls] = None,
+    *, sim_name: str = "",
 ) -> None:
     """把已就绪的 WDA 登记进端点表，供 readiness 探针与镜像使用。
 
@@ -133,6 +134,7 @@ def _register_wda_endpoint(
                 mjpeg_port=int(mjpeg_port),
                 client=WdaClient(base_url=f"http://127.0.0.1:{int(wda_port)}"),
                 duo=duo,
+                sim_name=sim_name,
             ),
         )
     except Exception as exc:  # noqa: BLE001
@@ -656,7 +658,7 @@ class IosSimVmManager:
                 existing.missing_ticks = 0
                 existing.start_request_id = str(msg.get("request_id") or "")
                 mark_managed(observed_udid)
-                _register_wda_endpoint(observed_udid, existing.wda_port, existing.mjpeg_port, existing.duo)
+                _register_wda_endpoint(observed_udid, existing.wda_port, existing.mjpeg_port, existing.duo, sim_name=existing.sim_name)
                 details = {k: v for k, v in existing.details.items()
                            if k not in {"cleanup_pending", "cleanup_error", "discovery_uncertain"}}
                 details.update(
@@ -802,7 +804,7 @@ class IosSimVmManager:
         runtime.ready = True
         runtime.missing_ticks = 0
         mark_managed(udid)
-        _register_wda_endpoint(udid, ports.wda, ports.mjpeg, runtime.duo)
+        _register_wda_endpoint(udid, ports.wda, ports.mjpeg, runtime.duo, sim_name=sim_name)
         logger.info(
             "iOS 虚拟机已就绪 vm_id={} udid={} name={} wda={} ",
             vm_id, udid, sim_name, ports.wda,
@@ -1433,7 +1435,7 @@ class IosSimVmManager:
                         rt.details.update({"wda_alive": rt.ready, "guest_state": "Booted"})
                         if rt.ready:
                             mark_managed(udid)
-                            _register_wda_endpoint(udid, rt.wda_port, rt.mjpeg_port, rt.duo)
+                            _register_wda_endpoint(udid, rt.wda_port, rt.mjpeg_port, rt.duo, sim_name=rt.sim_name)
                         else:
                             unmark_managed(udid)
                             _unregister_wda_endpoint(udid)
@@ -1470,7 +1472,7 @@ class IosSimVmManager:
                 self._runtimes[vm_id] = rt
                 if wda_alive:
                     mark_managed(udid)
-                    _register_wda_endpoint(udid, ports.wda, ports.mjpeg, rt.duo)
+                    _register_wda_endpoint(udid, ports.wda, ports.mjpeg, rt.duo, sim_name=rt.sim_name)
                 else:
                     unmark_managed(udid)
                     logger.info("受管虚拟机 {} 仍在运行但 WDA 未就绪", rt.sim_name)

@@ -79,6 +79,7 @@ class SimWdaEndpoint:
     mjpeg_port: int
     client: WdaClient
     duo: Optional[DuoControls] = None
+    sim_name: str = ""
 
 
 _SIM_ENDPOINTS: Dict[str, SimWdaEndpoint] = {}
@@ -595,13 +596,15 @@ def open_ios_simulator_driver(
             # 进度上报纯属锦上添花，失败绝不影响驱动打开
             pass
 
-    # 这里只有 udid、拿不到 vm_id，算不出实例名，交给 launcher 回退查询——
-    # 不是漏传。查不到时 launcher 会失败关闭，不会无身份校验地启动。
+    # Reuse the manager's verified instance identity. A transient simctl timeout
+    # must not discard a name already established during start/reconciliation.
+    # Without a registered name, the launcher still queries and fails closed.
     endpoint = get_sim_endpoint(udid)
     duo = endpoint.duo if endpoint is not None else None
+    sim_name = endpoint.sim_name if endpoint is not None else ""
     launcher = (
-        IosSimulatorWdaLauncher(udid, device_type=IPHONE_DUO_DEVICE_TYPE, simulator_display_id=duo.capture_id)
-        if duo is not None else IosSimulatorWdaLauncher(udid)
+        IosSimulatorWdaLauncher(udid, expect_sim_name=sim_name, device_type=IPHONE_DUO_DEVICE_TYPE, simulator_display_id=duo.capture_id)
+        if duo is not None else IosSimulatorWdaLauncher(udid, expect_sim_name=sim_name)
     )
     already_built = runner_app_path().is_dir()
     if already_built:
@@ -640,6 +643,7 @@ def open_ios_simulator_driver(
             mjpeg_port=int(launcher.ports.mjpeg),
             client=wda,
             duo=duo,
+            sim_name=sim_name,
         ),
     )
     _emit("ready", "虚拟机已就绪", "")

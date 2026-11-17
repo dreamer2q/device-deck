@@ -1,5 +1,6 @@
 """IosSimulatorDriver：坐标折算、应用清单、终止策略、与真机的隔离。"""
 import json
+from types import SimpleNamespace
 from typing import Any, Dict, List
 from unittest.mock import Mock
 
@@ -9,6 +10,25 @@ from ai_phone.agent.drivers import ios_simulator_driver as drv_mod
 from ai_phone.agent.drivers.ios_simulator_driver import IosSimulatorDriver
 from ai_phone.agent.drivers.simctl import SimctlError, SimulatorDevice
 from ai_phone.agent.drivers.wda_client import WdaClient
+
+
+def test_open_keeps_manager_identity_without_requiring_another_native_name_scan(monkeypatch, tmp_path):
+    launcher = Mock(ports=SimpleNamespace(wda=8305, mjpeg=9305), wda_url="http://127.0.0.1:8305")
+    factory = Mock(return_value=launcher)
+    client = Mock()
+    monkeypatch.setattr(drv_mod, "IosSimulatorWdaLauncher", factory)
+    monkeypatch.setattr(drv_mod, "WdaClient", Mock(return_value=client))
+    monkeypatch.setattr(drv_mod, "runner_app_path", lambda: tmp_path)
+    monkeypatch.setattr(drv_mod, "list_simulators", lambda: pytest.fail("unnecessary native discovery"))
+    drv_mod.register_sim_endpoint("SIM-test", drv_mod.SimWdaEndpoint(8305, 9305, client, sim_name="aiphone_sim_ours"))
+    try:
+        driver = drv_mod.open_ios_simulator_driver("SIM-test")
+        factory.assert_called_once_with("SIM-test", expect_sim_name="aiphone_sim_ours")
+        launcher.start.assert_called_once()
+        assert drv_mod.get_sim_endpoint("SIM-test").sim_name == "aiphone_sim_ours"
+        assert driver.serial == "SIM-test"
+    finally:
+        drv_mod.unregister_sim_endpoint("SIM-test")
 
 
 class FakeWda:
