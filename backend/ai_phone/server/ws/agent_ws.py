@@ -249,6 +249,7 @@ async def agent_ws(
     serials = {str(d.get("serial")) for d in devices if d.get("serial")}
     await hub.register_agent(agent_id, agent_name, host_os, ws, host_id=host_id)
     hub.set_agent_capabilities(agent_id, first.get("capabilities"))
+    hub.set_ios_environment(agent_id, first.get("ios_environment"))
     await hub.set_devices(agent_id, serials)
     await _upsert_devices(agent_id, devices, hub)
 
@@ -341,6 +342,7 @@ async def _dispatch(
         # 这里做幂等的设备列表覆盖：和初次握手共用 _upsert_devices + hub.set_devices。
         devices = msg.get("devices") or []
         hub.set_agent_capabilities(agent_id, msg.get("capabilities"))
+        hub.set_ios_environment(agent_id, msg.get("ios_environment"))
         devices = await filter_managed_devices_for_agent(agent_id, devices)
         devices = await _filter_managed_vm_devices(agent_id, devices, host_id=hub.agent_host_id(agent_id))
         serials = {str(d.get("serial")) for d in devices if d.get("serial")}

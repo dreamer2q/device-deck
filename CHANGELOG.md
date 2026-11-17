@@ -2,6 +2,19 @@
 
 本文只记录会影响部署、接入或排障口径的工程变化；细粒度代码历史仍以 Git commit 为准。
 
+## DeviceDeck 0.1.1 — 2026-11-17
+
+- Unify live devices and persistent simulator instances in one resource list;
+  retain stopped instances, validate host ownership and fail closed on missing lifecycle data.
+- Add platform/type filters, a focused device detail drawer and contextual actions;
+  move secondary tools under settings and mount only the active simulator platform.
+- Report bounded read-only iOS host preflight facts without certificate identities,
+  keys or local paths. Distinguish physical signing from Simulator prerequisites.
+- Default iOS creation to host-reported installed types/runtimes, retain the full
+  catalog as an explicit configuration-only option, and preserve server dispatch preflight.
+- Xcode/physical signing/Simulator runtime installation and actual device validation
+  are separate deployment gates; this version does not imply they have passed.
+
 ## DeviceDeck 0.1.0 MVP — 2026-11-17
 
 - Introduce DeviceDeck as an independent MIT downstream product with original

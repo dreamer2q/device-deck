@@ -25,6 +25,7 @@ async def list_agents(hub: Hub = HubDep) -> List[Dict[str, Any]]:
                 "agent_id": item.get("agent_id"),
                 "agent_name": item.get("agent_name"),
                 "host_os": item.get("host_os"),
+                "ios_environment": item.get("ios_environment") or {},
                 "connected_at": connected_at,
                 "last_seen_at": last_seen_at,
                 "last_seen_age_ms": max(0, int((now - last_seen_ts) * 1000))

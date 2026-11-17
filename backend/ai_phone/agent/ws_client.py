@@ -283,6 +283,8 @@ class AgentWSClient:
         if not self._hello_sent and not initial:
             return False
         ws = self._ws
+        from .ios_environment import collect_ios_environment
+        environment = await asyncio.to_thread(collect_ios_environment)
         sent = await self.send(
             {
                 "type": P.MSG_HELLO,
@@ -291,6 +293,7 @@ class AgentWSClient:
                 "host_os": self.host_os,
                 **({"host_id": self.host_id} if self.host_id else {}),
                 "devices": devices,
+                "ios_environment": environment,
                 "capabilities": [
                     P.CAP_V3_PLATFORM_CACHE, P.CAP_ANDROID_VM_FOLDABLE,
                     P.CAP_ANDROID_VM_DISPLAY, P.CAP_NATIVE_VM_DISPLAY,

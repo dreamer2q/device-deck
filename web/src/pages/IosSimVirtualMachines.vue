@@ -16,7 +16,12 @@ const busyByVm = reactive({})
 const err = ref('')
 const catalogErr = ref('')
 const modelSearch = ref('')
+const hostId = ref('')
+const showFullCatalog = ref(false)
+const selectedHost = computed(() => catalog.hosts.find(h => h.agent_id === hostId.value))
+const installedRuntimes = computed(() => (selectedHost.value?.environment?.runtimes || []).filter(r => r.isAvailable === true))
 const catalog = reactive({
+  hosts: [],
   device_types: [],
   official_runtimes: [],
   xcode_version: '',
@@ -61,7 +66,8 @@ const families = computed(() => {
 })
 
 const deviceTypesForFamily = computed(() =>
-  catalog.device_types.filter((dt) => dt.product_family === form.family),
+  catalog.device_types.filter((dt) => dt.product_family === form.family
+    && (showFullCatalog.value || (selectedHost.value?.environment?.device_types || []).some(t => t.identifier === dt.identifier))),
 )
 
 const visibleDeviceTypes = computed(() => {
@@ -82,7 +88,8 @@ const selectedDeviceType = computed(() =>
 const runtimesForSelectedModel = computed(() => {
   const dt = selectedDeviceType.value
   if (!dt) return []
-  return catalog.official_runtimes.filter((rt) =>
+  const available = showFullCatalog.value ? catalog.official_runtimes : installedRuntimes.value
+  return available.filter((rt) =>
     versionInRange(rt.version || '', dt)
     && (!rt.only_device_type || rt.only_device_type === dt.identifier)
     && (!dt.runtime_identifiers || dt.runtime_identifiers.includes(rt.identifier)),
@@ -176,14 +183,16 @@ async function loadCatalog() {
   try {
     const result = await internal.iosSimVms.catalog()
     Object.assign(catalog, {
+      hosts: result?.hosts || [],
       device_types: result?.device_types || [],
       official_runtimes: result?.official_runtimes || [],
       xcode_version: result?.xcode_version || '',
       source: result?.source || '',
       collected_at: result?.collected_at || '',
     })
+    if (!catalog.hosts.some(h => h.agent_id === hostId.value)) hostId.value = catalog.hosts[0]?.agent_id || ''
     if (!catalog.device_types.length) {
-      catalogErr.value = 'Server 尚未导入 iOS 虚拟机官方机型目录'
+      catalogErr.value = 'Server 尚未导入 iOS 模拟器官方机型目录'
     }
     if (!selectedDeviceType.value) chooseInitialCatalogValues()
   } catch (e) {
@@ -214,13 +223,19 @@ async function createVm() {
   busyId.value = 'create'
   err.value = ''
   try {
-    await internal.iosSimVms.create({
+    const created = await internal.iosSimVms.create({
       alias: form.alias.trim(),
       device_type: form.device_type,
       runtime: form.runtime,
       initial_orientation: form.initial_orientation || null,
       initial_fold_state: canChooseStartupFold.value ? form.initial_fold_state || null : null,
     })
+    if (!showFullCatalog.value && selectedHost.value && created?.id) {
+      // The existing server preflight remains authoritative; a host report is
+      // only a picker hint, not permission to bypass dispatch checks.
+      try { await internal.iosSimVms.dispatch(created.id, selectedHost.value.agent_id) }
+      catch (e) { err.value = `配置已创建，启动未完成：${prettyErr(e)}` }
+    }
     resetForm()
     await loadInstances({ quiet: true })
   } catch (e) {
@@ -433,7 +448,7 @@ function pollInstances() {
 
 onMounted(() => {
   refresh()
-  pollTimer = setInterval(pollInstances, 3000)
+  pollTimer = setInterval(() => { if (!document.hidden) pollInstances() }, 3000)
 })
 onBeforeUnmount(() => {
   instanceSeq += 1
@@ -451,16 +466,17 @@ defineExpose({ refresh })
     <div class="layout">
       <form class="panel create" @submit.prevent="createVm">
         <div class="section-title">
-          <h2>新建 iOS 虚拟机</h2>
-          <p>机型目录随 Server 内置发布，来自 Xcode 官方 <code>simctl</code> 导出。</p>
+          <h2>添加 iOS 模拟器</h2>
+          <p>默认选择运行位置已安装的机型和系统；创建后准备并启动。</p>
           <!-- 只报机型数量。目录是哪个 Xcode 导出的属于内部实现细节，用户看了
                既不能用来做判断，还容易和「我这台机器装的 Xcode」搞混。 -->
-          <div class="catalog-meta">
-            <strong>可选机型：{{ catalog.device_types.length }} 台</strong>
-          </div>
+          <label v-if="catalog.hosts.length > 1">运行位置<select v-model="hostId" @change="chooseInitialCatalogValues"><option v-for="h in catalog.hosts" :key="h.agent_id" :value="h.agent_id">{{ h.agent_name }}</option></select></label>
+          <p v-else>运行位置：{{ selectedHost?.agent_name || '尚无可用的 Mac 环境报告' }}</p>
+          <p v-if="selectedHost?.environment?.checked_at" class="field-help">{{ selectedHost.environment.xcode_version || 'Xcode 待安装' }} · 最近检查 {{ new Date(selectedHost.environment.checked_at).toLocaleString() }}</p>
+          <p v-if="!installedRuntimes.length" class="notice">当前运行位置尚未报告可用的 iOS runtime，完成环境安装后刷新。模拟器不需要真机开发证书。</p>
+          <label class="field-help"><input v-model="showFullCatalog" type="checkbox" @change="chooseInitialCatalogValues" /> 查看完整目录（仅创建配置，未安装版本不能直接运行）</label>
           <p>
-            这里只列「机型支持哪些系统版本」。某台 Agent 究竟装了哪些 runtime，
-            要靠右侧的探查确认——每台机器装的 Xcode 都不一样。
+            下发前仍会重新检查目标环境，避免旧状态或版本不兼容导致错误启动。
           </p>
         </div>
 
@@ -528,8 +544,7 @@ defineExpose({ refresh })
               </option>
             </select>
             <small>
-              列出苹果官方发布过的、且该机型支持的全部版本。目标 Agent 有没有装这个
-              版本要看探查结果——没装的话探查会告诉你，装上即可。
+              默认只显示选定运行位置已安装且可用的版本；完整目录用于提前建立配置。
             </small>
           </label>
           <div v-if="selectedDeviceType && !runtimesForSelectedModel.length" class="notice">
@@ -566,16 +581,16 @@ defineExpose({ refresh })
         </div>
 
         <button class="primary" type="submit" :disabled="busyId === 'create' || !catalogReady">
-          {{ busyId === 'create' ? '创建中…' : '创建配置' }}
+          {{ busyId === 'create' ? '准备中…' : (showFullCatalog ? '仅创建配置' : '创建并启动') }}
         </button>
       </form>
 
       <div class="panel list">
         <div class="list-head">
-          <h2>iOS 虚拟机配置</h2>
+          <h2>iOS 模拟器配置</h2>
           <span>{{ instances.length }} 台</span>
         </div>
-        <div v-if="!instances.length" class="empty">暂无 iOS 虚拟机配置</div>
+        <div v-if="!instances.length" class="empty">暂无 iOS 模拟器配置</div>
         <div v-else class="cards">
           <article v-for="vm in instances" :key="vm.id" class="card">
             <div class="card-head">

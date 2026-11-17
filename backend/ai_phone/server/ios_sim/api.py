@@ -140,7 +140,7 @@ async def _resolve_names(
 # 目录
 # ---------------------------------------------------------------------------
 @catalog_router.get("/catalog")
-async def get_catalog(session: AsyncSession = DBSession) -> Dict[str, Any]:
+async def get_catalog(session: AsyncSession = DBSession, hub: Hub = HubDep) -> Dict[str, Any]:
     """官方机型目录。前端左侧选择器用。
 
     只回答「有哪些机型、各自支持哪些系统版本」。**「这台 Agent 装了哪些 runtime」
@@ -153,7 +153,15 @@ async def get_catalog(session: AsyncSession = DBSession) -> Dict[str, Any]:
             status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="官方机型目录尚未导入；请重启 Server 或检查 official_catalog.json",
         )
-    return row.to_dict()
+    payload = row.to_dict()
+    # Host facts are timestamped live Agent reports, not the bundled catalog.
+    payload["hosts"] = [
+        {"agent_id": item["agent_id"], "agent_name": item["agent_name"],
+         "environment": item.get("ios_environment") or {}}
+        for item in (hub.snapshot().get("agents", []) if isinstance(hub, Hub) else [])
+        if (item.get("ios_environment") or {}).get("supported") is True
+    ]
+    return payload
 
 
 # ---------------------------------------------------------------------------

@@ -36,6 +36,7 @@ class AgentConn:
     run_ids: Set[str] = field(default_factory=set)
     capabilities: Set[str] = field(default_factory=set)
     host_id: str = ""
+    ios_environment: Dict[str, Any] = field(default_factory=dict)
 
 
 class Hub:
@@ -279,6 +280,12 @@ class Hub:
         conn = self._agents.get(agent_id)
         return conn is not None and capability in conn.capabilities
 
+    def set_ios_environment(self, agent_id: str, value: Any) -> None:
+        from ai_phone.shared.ios_environment import safe_ios_environment
+        conn = self._agents.get(agent_id)
+        if conn is not None:
+            conn.ios_environment = safe_ios_environment(value)
+
     # ------------------------------------------------------------------
     # Run 路由
     # ------------------------------------------------------------------
@@ -409,6 +416,7 @@ class Hub:
                     "agent_name": c.agent_name,
                     "host_os": c.host_os,
                     "host_id": c.host_id,
+                    "ios_environment": c.ios_environment,
                     "connected_at": c.connected_at,
                     "last_seen_at": c.last_seen_at,
                     "serials": sorted(c.serials),

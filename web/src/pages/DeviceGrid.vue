@@ -2,6 +2,9 @@
 import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import DeviceTable from '../components/DeviceTable.vue'
+import DeviceDetails from '../components/DeviceDetails.vue'
+import { mergeResources, filterResources, resourceStatus } from '../lib/deviceResources.js'
+import { canStart, canStop } from '../lib/vmLifecycle.js'
 import { api, internal } from '../lib/api.js'
 import { platformLabel } from '../lib/platform.js'
 
@@ -9,13 +12,24 @@ const route = useRoute()
 const router = useRouter()
 const devices = ref([])
 const agents = ref([])
+const instances = ref([])
 const loading = ref(false)
 const error = ref(null)
 const filter = ref('all')
+const platform = ref('all')
+const kind = ref('all')
 const search = ref('')
+const selectedId = ref('')
+const busy = ref('')
+const families = { android: internal.androidVms, ios_sim: internal.iosSimVms, harmony: internal.harmonyVms }
 let pollTimer = null
+let refreshTask = null
+let active = true
+const resourceErrors = ref([])
 
 async function maintenance(device) {
+  if (busy.value || device.lock) return
+  busy.value = device.resource_id
   try {
     await fetch(`/api/devices/${encodeURIComponent(device.serial)}/mirror-maintenance`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -23,84 +37,56 @@ async function maintenance(device) {
     }).then(async r => { if (!r.ok) throw Error((await r.json()).detail || '维护操作失败') })
     await refresh()
   } catch (e) { error.value = String(e) }
+  finally { busy.value = '' }
 }
 
-async function refresh() {
+function refresh() {
+  if (refreshTask) return refreshTask
   loading.value = true
-  error.value = null
-  try {
-    const [devs, agts] = await Promise.all([
-      api.listDevices(),
-      api.listAgents().catch(() => []),
-    ])
-    devices.value = Array.isArray(devs) ? devs : []
-    agents.value = Array.isArray(agts) ? agts : []
-  } catch (e) {
-    error.value = String(e)
-  } finally {
-    loading.value = false
-  }
+  const entries = Object.entries(families)
+  refreshTask = Promise.allSettled([api.listDevices(), api.listAgents(), ...entries.map(([, api]) => api.list())])
+    .then(results => {
+      if (!active) return
+      const errors = []
+      if (results[0].status === 'fulfilled') devices.value = results[0].value
+      else { devices.value = []; errors.push('实时设备读取失败') }
+      if (results[1].status === 'fulfilled') agents.value = results[1].value
+      else { agents.value = []; errors.push('运行位置状态读取失败') }
+      instances.value = entries.flatMap(([platform], index) => {
+        const r = results[index + 2]
+        if (r.status !== 'fulfilled' || !Array.isArray(r.value)) {
+          errors.push(`${platform === 'ios_sim' ? 'iOS' : platform} 模拟器读取失败`)
+          // Fail closed for stale lifecycle actions, retain visible resource IDs.
+          return instances.value.filter(vm => vm.platform === platform).map(vm => ({ ...vm, lifecycle: undefined }))
+        }
+        return r.value.map(vm => ({ ...vm, platform }))
+      })
+      resourceErrors.value = errors
+    }).finally(() => { refreshTask = null; loading.value = false })
+  return refreshTask
 }
-
-const agentBySerial = computed(() => {
-  const map = new Map()
-  for (const a of agents.value) {
-    for (const serial of a.serials || []) {
-      map.set(serial, a)
-    }
-  }
-  return map
-})
-
-const enrichedDevices = computed(() => (
-  devices.value.map((d) => {
-    const agent = agentBySerial.value.get(d.serial)
-    return {
-      ...d,
-      agent_online: !!agent,
-      agent_name_current: agent?.agent_name || '',
-      agent_id_current: agent?.agent_id || d.agent_id || '',
-    }
-  })
-))
-
-// "空闲可派单"必须和 scheduler 一致：online 且 readiness.ready === true。
-// readiness 尚未上报时属于"未盖章"，不能显示成绿色空闲，避免插线瞬间误导。
-function isNotReady(d) {
-  return d.effective_status === 'online' && d.extra?.readiness?.ready !== true
-}
-function isReadyIdle(d) {
-  return d.effective_status === 'online' && d.extra?.readiness?.ready === true
-}
-
-const filtered = computed(() => {
-  const term = search.value.trim().toLocaleLowerCase()
-  const list = enrichedDevices.value.filter(d => !term || [d.alias, d.serial, d.model, d.brand, d.platform, d.agent_name_current, d.agent_id_current]
-    .some(value => String(value || '').toLocaleLowerCase().includes(term)))
-  if (filter.value === 'online') return list.filter(isReadyIdle)
-  if (filter.value === 'not_ready') return list.filter(isNotReady)
-  if (filter.value === 'busy') return list.filter((d) => d.effective_status === 'busy')
-  if (filter.value === 'offline') return list.filter((d) => d.effective_status === 'offline')
-  return list
-})
-
+const enrichedDevices = computed(() => mergeResources(devices.value, instances.value, agents.value))
+const selected = computed(() => enrichedDevices.value.find(d => d.resource_id === selectedId.value))
+const filtered = computed(() => filterResources(enrichedDevices.value, { search: search.value, platform: platform.value, kind: kind.value, status: filter.value }))
 const counts = computed(() => {
-  const base = { all: enrichedDevices.value.length, online: 0, not_ready: 0, busy: 0, offline: 0 }
-  for (const d of enrichedDevices.value) {
-    if (isNotReady(d)) base.not_ready += 1
-    else if (isReadyIdle(d)) base.online += 1
-    else if (d.effective_status === 'busy') base.busy += 1
-    else if (d.effective_status === 'offline') base.offline += 1
-  }
+  const base = { all: enrichedDevices.value.length, online: 0, not_ready: 0, busy: 0, offline: 0, stopped: 0 }
+  for (const d of enrichedDevices.value) base[resourceStatus(d).group]++
   return base
 })
-
-const agentSummary = computed(() => {
-  const online = agents.value.length
-  const devicesTotal = agents.value.reduce((sum, a) => sum + Number(a.device_count || 0), 0)
-  const runningTotal = agents.value.reduce((sum, a) => sum + Number(a.running_count || 0), 0)
-  return { online, devicesTotal, runningTotal }
-})
+async function vmAction(device, action) {
+  if (busy.value || device.lock || !device.vm) return
+  if (action === 'start' ? !canStart(device.vm) : !canStop(device.vm)) return
+  if (action === 'stop' && !confirm(`停止“${device.alias}”？应用和数据将保留。`)) return
+  busy.value = device.resource_id
+  error.value = null
+  try {
+    await families[device.platform][action](device.vm.id)
+    // Do not let an earlier poll overwrite the operation's resulting state.
+    await refreshTask
+    await refresh()
+  } catch (e) { error.value = prettyErr(e) }
+  finally { busy.value = '' }
+}
 const lockLostNotice = computed(() => {
   if (route.query.lockLost !== '1') return ''
   const serial = String(route.query.serial || '')
@@ -113,26 +99,18 @@ function dismissLockNotice() {
   router.replace({ path: '/', query: {} })
 }
 
-function formatAgentAge(ms) {
-  if (ms == null) return '-'
-  const sec = Math.max(0, Math.round(Number(ms) / 1000))
-  if (sec < 60) return `${sec}s`
-  const min = Math.floor(sec / 60)
-  if (min < 60) return `${min}m`
-  return `${Math.floor(min / 60)}h`
-}
-
 onMounted(() => {
   refresh()
-  pollTimer = setInterval(refresh, 3000)
+  pollTimer = setInterval(() => { if (!document.hidden) refresh() }, 3000)
 })
 onBeforeUnmount(() => {
+  active = false
   if (pollTimer) clearInterval(pollTimer)
 })
 
 // ---------------- 别名编辑弹窗 ----------------
 // 设计：单一 reactive state 驱动；"保存" / "删除绑定" / "取消" 三个动作互斥。
-// 401 / 403 直接提示"鉴权失败，请在 URL 后加 ?token=xxx"，调用方自己刷新即可。
+// Access configuration is owned by the server gateway, never a URL token.
 const dlg = reactive({
   open: false,
   serial: '',
@@ -150,6 +128,7 @@ const dlg = reactive({
 })
 
 function openEdit(device) {
+  selectedId.value = ''
   dlg.open = true
   dlg.serial = device.serial
   dlg.platform = device.platform || ''
@@ -160,13 +139,13 @@ function openEdit(device) {
   dlg.busy = false
   dlg.error = ''
   dlg.vmInstanceId =
-    device.extra?.device_kind === 'virtual' ? device.extra?.vm_instance_id || '' : ''
+    device.vm || device.extra?.device_kind === 'virtual' ? device.extra?.vm_instance_id || '' : ''
   // 用 device.platform 而不是 extra.vm_platform：后者是**产品归属**（iOS 虚拟机
   // 报的是 'ios'，因为对外只有三端），而这里要决定的是「归哪个虚拟机子系统的接口管」，
   // 那由 device.platform 决定（android / harmony / ios_sim）。
   dlg.vmPlatform = device.platform || ''
   // 如果已经绑过，异步把 note 拉回来（别名表里存了备注）
-  if (device.alias) {
+  if (device.alias && !dlg.vmInstanceId) {
     internal.deviceAliases
       .get(device.serial)
       .then((row) => {
@@ -255,7 +234,7 @@ function prettyErr(e) {
     return '别名冲突：该名字已被另一台设备占用。'
   }
   if (msg.includes('401') || msg.includes('403')) {
-    return '鉴权失败：请在 URL 后附加 ?token=<内部 token>。'
+    return '服务访问配置异常，请检查服务端网关设置。'
   }
   return msg
 }
@@ -265,17 +244,17 @@ function prettyErr(e) {
   <section class="page">
     <header class="head">
       <h2>设备 <span class="total-count">{{ counts.all }}</span></h2>
-      <RouterLink class="library-link" to="/device-library">设备库 ↗</RouterLink>
+      <RouterLink class="library-link" to="/virtual-machines">＋ 添加模拟器</RouterLink>
       <div class="toolbar">
-        <input v-model="search" type="search" class="device-search" placeholder="搜索设备、型号或节点" aria-label="搜索设备、型号或节点" />
+        <input v-model="search" type="search" class="device-search" placeholder="搜索名称、型号或系统" aria-label="搜索设备" />
         <div class="filters">
           <button
-            v-for="f in ['all', 'online', 'not_ready', 'busy', 'offline']"
+            v-for="f in ['all', 'online', 'not_ready', 'busy', 'stopped', 'offline']"
             :key="f"
             :class="{ active: filter === f }"
             @click="filter = f"
           >
-            {{ { all: '全部', online: '空闲', not_ready: '未就绪', busy: '占用中', offline: '离线' }[f] }}
+            {{ { all: '全部', online: '可操作', not_ready: '待处理', busy: '占用中', stopped: '未启动', offline: '离线' }[f] }}
             <span class="n">{{ counts[f] }}</span>
           </button>
         </div>
@@ -291,26 +270,14 @@ function prettyErr(e) {
     </p>
     <p v-if="error" class="err">加载失败：{{ error }}</p>
 
-    <details class="agent-panel">
-      <summary><span class="agent-dot" />{{ agentSummary.online }} 个在线节点 <span class="agent-summary">{{ agentSummary.devicesTotal }} 台设备 · {{ agentSummary.runningTotal }} 个运行任务</span><span class="agent-expand">节点详情</span></summary>
-      <div v-if="agents.length" class="agent-list">
-        <div v-for="a in agents" :key="a.agent_id" class="agent-item">
-          <span class="agent-dot"></span>
-          <div class="agent-main">
-            <div class="agent-name">{{ a.agent_name || a.agent_id }}</div>
-            <div class="agent-meta">
-              {{ a.host_os || '-' }} · {{ a.device_count || 0 }} 台设备 · {{ a.running_count || 0 }} 运行中 · {{ formatAgentAge(a.last_seen_age_ms) }} 前心跳
-            </div>
-          </div>
-        </div>
-      </div>
-      <div v-else class="agent-empty">暂无在线 Agent</div>
-    </details>
-
-    <DeviceTable v-if="filtered.length" :devices="filtered" @edit-alias="openEdit" @maintenance="maintenance" />
-    <p v-else class="empty">
-      暂无符合条件的设备。确认 Agent 已连上 Server（见后端日志 "Agent 上线"）。
-    </p>
+    <div class="resource-filters">
+      <div><span>平台</span><button v-for="p in ['all', 'android', 'ios', 'harmony']" :key="p" :class="{ chosen: platform === p }" @click="platform = p">{{ { all: '全部', android: 'Android', ios: 'iOS', harmony: '鸿蒙' }[p] }}</button></div>
+      <div><span>类型</span><button v-for="k in ['all', 'physical', 'virtual']" :key="k" :class="{ chosen: kind === k }" @click="kind = k">{{ { all: '全部', physical: '真机', virtual: '模拟器' }[k] }}</button></div>
+    </div>
+    <p v-if="resourceErrors.length" class="err">{{ resourceErrors.join('；') }}。受影响的操作暂不可用。</p>
+    <DeviceTable v-if="filtered.length" :devices="filtered" :busy="busy" @details="d => selectedId = d.resource_id" @start="d => vmAction(d, 'start')" />
+    <p v-else class="empty">{{ loading ? '正在读取设备…' : '没有符合条件的设备。可调整筛选，或添加一个模拟器。' }}</p>
+    <DeviceDetails v-if="selected" :device="selected" :busy="busy" @close="selectedId = ''" @edit="openEdit" @maintenance="maintenance" @start="d => vmAction(d, 'start')" @stop="d => vmAction(d, 'stop')" @refresh="refresh" />
 
     <!-- 别名编辑弹窗 -->
     <div v-if="dlg.open" class="modal-mask" @click.self="closeEdit">
@@ -332,13 +299,13 @@ function prettyErr(e) {
           <div class="field">
             <label>
               别名 <span class="req">*</span>
-              <span class="hint">外部 API 里 deviceAliasPools 内的别名必须精确匹配这里的值</span>
+              <span class="hint">使用便于识别的名称</span>
             </label>
             <input
               v-model="dlg.alias"
               type="text"
               maxlength="128"
-              placeholder="例：android-pixel7-beijing-01"
+              placeholder="例如：iPhone 回归测试"
               :disabled="dlg.busy"
               @keyup.enter="saveAlias"
             />
@@ -355,7 +322,7 @@ function prettyErr(e) {
             />
           </div>
           <p v-else class="hint" style="margin: -4px 0 0">
-            这是虚拟机，别名即设备身份（vm_id 唯一锚定），改名会回写 VM 配置。
+            修改模拟器名称，不改变实例身份或应用数据。
           </p>
 
           <p v-if="dlg.error" class="err-inline">{{ dlg.error }}</p>
@@ -381,6 +348,10 @@ function prettyErr(e) {
 </template>
 
 <style scoped>
+.resource-filters { display: flex; gap: 28px; flex-wrap: wrap; align-items: center; margin-bottom: 16px; }
+.resource-filters > div { display: flex; align-items: center; gap: 4px; }.resource-filters span { color: #8592a3; font-size: 11px; margin-right: 7px; }
+.resource-filters button { padding: 5px 9px; border: 0; border-radius: 4px; background: transparent; color: #6c7a8c; font: inherit; font-size: 11px; cursor: pointer; }.resource-filters button.chosen { color: #286eb7; background: #e9f2fc; }
+
 .page {
   padding: 16px 18px 24px;
 }

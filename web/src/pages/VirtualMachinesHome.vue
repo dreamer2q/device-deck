@@ -1,10 +1,16 @@
 <script setup>
 import { computed, ref } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import HarmonyVirtualMachines from './HarmonyVirtualMachines.vue'
 import IosSimVirtualMachines from './IosSimVirtualMachines.vue'
 import VirtualMachines from './VirtualMachines.vue'
 
-const platform = ref('android')
+const route = useRoute()
+const router = useRouter()
+const platform = computed({
+  get: () => ['android', 'harmony', 'ios_sim'].includes(route.query.platform) ? route.query.platform : 'android',
+  set: value => router.replace({ query: { ...route.query, platform: value } }),
+})
 const androidPage = ref(null)
 const harmonyPage = ref(null)
 const iosSimPage = ref(null)
@@ -49,17 +55,17 @@ async function refreshActive() {
           :class="{ active: platform === 'ios_sim' }"
           @click="platform = 'ios_sim'"
         >
-          iOS 虚拟机
+          iOS 模拟器
         </button>
       </div>
       <button type="button" class="refresh" :disabled="refreshing" @click="refreshActive">
         {{ refreshing ? '刷新中…' : '刷新' }}
       </button>
     </nav>
-    <!-- v-show 保留各页已填的表单、筛选与轮询状态，切 Tab 不重置。 -->
-    <VirtualMachines ref="androidPage" v-show="platform === 'android'" />
-    <HarmonyVirtualMachines ref="harmonyPage" v-show="platform === 'harmony'" />
-    <IosSimVirtualMachines ref="iosSimPage" v-show="platform === 'ios_sim'" />
+    <!-- Only the active platform is mounted: hidden pages must not probe/poll. -->
+    <VirtualMachines v-if="platform === 'android'" ref="androidPage" />
+    <HarmonyVirtualMachines v-if="platform === 'harmony'" ref="harmonyPage" />
+    <IosSimVirtualMachines v-if="platform === 'ios_sim'" ref="iosSimPage" />
   </section>
 </template>
 

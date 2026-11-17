@@ -1,61 +1,37 @@
 <script setup>
 import { platformLabel } from '../lib/platform.js'
-import { deviceStatus, deviceReadinessHint } from '../lib/deviceStatus.js'
-defineProps({ devices: { type: Array, required: true } })
-const emit = defineEmits(['edit-alias', 'maintenance'])
-const isVirtual = device => device.extra?.is_virtual === true || device.extra?.device_kind === 'virtual'
-const identity = device => isVirtual(device) ? device.extra?.vm_instance_id || device.serial : device.serial
-const agentName = device => device.agent_name_current || device.agent_id_current || device.agent_id || '—'
+import { resourceStatus, resourceCanOpen, isVirtual } from '../lib/deviceResources.js'
+import { canStart } from '../lib/vmLifecycle.js'
+defineProps({ devices: { type: Array, required: true }, busy: { type: String, default: '' } })
+const emit = defineEmits(['details', 'start'])
 </script>
 
 <template>
-  <div class="table-wrap">
-    <table class="device-table">
-      <thead><tr><th>设备 / 标识</th><th>平台</th><th>状态</th><th>型号 / 系统</th><th>所在节点</th><th class="actions">操作</th></tr></thead>
-      <tbody>
-        <tr v-for="d in devices" :key="d.serial">
-          <td class="device-cell">
-            <RouterLink :to="`/device/${encodeURIComponent(d.serial)}`" class="device-name" :title="d.alias || d.model">{{ d.alias || d.model || '未命名设备' }}</RouterLink>
-            <span v-if="isVirtual(d)" class="kind">VM</span>
-            <div class="secondary mono" :title="d.serial">{{ identity(d) }}</div>
-          </td>
-          <td><span class="platform">{{ platformLabel(d) }}</span></td>
-          <td>
-            <span class="status" :class="deviceStatus(d).cls"><i />{{ deviceStatus(d).label }}</span>
-            <div v-if="deviceReadinessHint(d)" class="secondary readiness" :title="deviceReadinessHint(d)">{{ deviceReadinessHint(d) }}</div>
-            <div v-if="d.lock" class="secondary" :title="d.lock.holder">{{ ['manual', 'session'].includes(d.lock.holder_type) ? '人工控制' : 'Agent 任务' }} · {{ d.lock.holder }}</div>
-          </td>
-          <td><span>{{ [d.brand, d.model].filter(Boolean).join(' ') || '—' }}</span><div class="secondary">{{ d.os_version || '—' }}<span v-if="d.screen_width"> · {{ d.screen_width }}×{{ d.screen_height }}</span></div></td>
-          <td class="node-cell"><span :title="agentName(d)">{{ agentName(d) }}</span><div class="secondary"><span class="node-dot" :class="{ connected: d.agent_online }" />{{ d.agent_online ? '已连接' : '未连接' }}</div></td>
-          <td class="actions"><button :disabled="!!d.lock" @click="emit('maintenance', d)">{{ d.extra?.mirror_paused ? '恢复' : '暂停镜像' }}</button> <button type="button" @click="emit('edit-alias', d)">改名</button><RouterLink class="enter" :to="`/device/${encodeURIComponent(d.serial)}`">工作台 ↗</RouterLink></td>
-        </tr>
-      </tbody>
-    </table>
+  <div class="resource-list" role="list" aria-label="设备列表">
+    <div class="list-heading" aria-hidden="true"><span>设备</span><span>类型 / 系统</span><span>当前状态</span><span>操作</span></div>
+    <article v-for="d in devices" :key="d.resource_id" class="resource-row" role="listitem">
+      <div class="identity"><button class="name" @click="emit('details', d)">{{ d.alias || d.model || '未命名设备' }}</button><div class="secondary">{{ [d.brand, d.model].filter(Boolean).join(' ') || '待准备实例' }}</div></div>
+      <div class="type"><span class="chip">{{ platformLabel(d) }} · {{ isVirtual(d) ? '模拟器' : '真机' }}</span><div class="secondary">{{ d.os_version || '系统待检测' }}</div></div>
+      <div class="state"><span class="status" :class="resourceStatus(d).cls"><i />{{ resourceStatus(d).label }}</span><div v-if="resourceStatus(d).hint" class="secondary hint" :title="resourceStatus(d).hint">{{ resourceStatus(d).hint }}</div><div v-if="d.lock" class="secondary">{{ d.lock.holder || '占用者未知' }}</div></div>
+      <div class="actions">
+        <RouterLink v-if="resourceCanOpen(d)" class="primary" :to="`/device/${encodeURIComponent(d.serial)}`">{{ d.lock ? '查看' : '打开' }}</RouterLink>
+        <button v-else-if="d.vm && canStart(d.vm)" class="primary" :disabled="!!busy" @click="emit('start', d)">{{ busy === d.resource_id ? '提交中…' : '启动' }}</button>
+        <button v-else class="primary" @click="emit('details', d)">检查状态</button>
+        <button class="detail" @click="emit('details', d)">详情</button>
+      </div>
+    </article>
   </div>
 </template>
 
 <style scoped>
-.table-wrap { overflow: auto; border: 1px solid #dfe4ea; border-radius: 5px; background: #fff; }
-.device-table { width: 100%; border-collapse: collapse; text-align: left; font-size: 12px; table-layout: fixed; min-width: 780px; }
-th { padding: 9px 12px; color: #697386; font-weight: 500; background: #f8fafc; border-bottom: 1px solid #dfe4ea; white-space: nowrap; position: sticky; top: 0; z-index: 1; }
-th:first-child { width: 25%; } th:nth-child(2) { width: 9%; } th:nth-child(3) { width: 16%; } th:nth-child(4) { width: 19%; } th:nth-child(5) { width: 18%; } th:last-child { width: 214px; }
-td { padding: 8px 12px; border-bottom: 1px solid #edf0f3; vertical-align: middle; }
-tr:last-child td { border-bottom: 0; } tbody tr:hover { background: #f8fbff; }
-.device-name { font-weight: 600; color: #182b45; text-decoration: none; overflow-wrap: anywhere; }
-.device-name:hover { color: #1d66c2; text-decoration: underline; }
-.secondary { font-size: 11px; line-height: 1.5; color: #758094; margin-top: 3px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
-.kind { font-size: 9px; margin-left: 6px; color: #6b7280; border: 1px solid #dfe4ea; border-radius: 3px; padding: 1px 4px; }
-.platform { font-size: 10px; color: #475569; letter-spacing: .03em; }
-.status { display: inline-flex; align-items: center; gap: 6px; font-size: 11px; color: #64748b; }
-.status i, .node-dot { display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: #94a3b8; }
-.status.ok { color: #167246; } .status.ok i, .node-dot.connected { background: #26a269; }
-.status.warn { color: #a16a0c; } .status.warn i { background: #d69a27; }
-.status.busy { color: #2563b4; } .status.busy i { background: #3979d4; }
-.node-cell > span { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.node-dot { margin-right: 5px; }
-.actions { text-align: right; white-space: nowrap; }
-.actions button, .enter { padding: 5px 7px; border: 1px solid #dfe4ea; border-radius: 4px; background: #fff; color: #536176; font: inherit; font-size: 11px; cursor: pointer; text-decoration: none; }
-.enter { margin-left: 5px; color: #1c63b3; border-color: #c7dbf3; }
-button:hover, .enter:hover { background: #eef5fe; }
+.resource-list { border: 1px solid #dfe5ed; border-radius: 7px; overflow: hidden; background: #fff; }
+.list-heading,.resource-row { display: grid; grid-template-columns: minmax(180px,1.1fr) minmax(120px,.7fr) minmax(180px,1.2fr) 130px; align-items: center; gap: 16px; padding: 12px 16px; }
+.list-heading { padding-top: 8px; padding-bottom: 8px; color: #748093; background: #f8fafc; font-size: 11px; }
+.list-heading span:last-child { text-align: right; }
+.resource-row + .resource-row { border-top: 1px solid #edf0f4; }.resource-row:hover { background: #fafcff; }
+.resource-row > div { min-width: 0; }.name { border: 0; padding: 0; background: none; color: #233951; font-size: 13px; font-weight: 600; cursor: pointer; text-align: left; overflow-wrap: anywhere; }
+.secondary { color: #788599; font-size: 11px; line-height: 1.5; margin-top: 4px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }.chip { font-size: 11px; color: #53647b; }
+.status { font-size: 12px; display: inline-flex; gap: 6px; align-items: center; }.status i { width: 6px; height: 6px; border-radius: 50%; background: currentColor; }.ok { color: #15805b; }.warn { color: #a06a15; }.off { color: #8290a3; }.busy { color: #2e6eae; }
+.actions { display: flex; justify-content: flex-end; align-items: center; gap: 5px; }.actions button,.primary { padding: 6px 9px; border-radius: 4px; font: inherit; font-size: 11px; cursor: pointer; text-decoration: none; border: 1px solid #cbdcf0; background: #f2f7fd; color: #2663a4; }.actions .detail { background: #fff; color: #68778b; border-color: #e0e6ee; }
+@media(max-width:700px) { .list-heading { display: none; }.resource-row { grid-template-columns: 1fr auto; gap: 10px; padding: 14px; }.type { grid-column: 1; grid-row: 2; }.state { grid-column: 1; grid-row: 3; }.actions { grid-column: 2; grid-row: 1 / span 3; flex-direction: column; }.hint { white-space: normal; } }
 </style>

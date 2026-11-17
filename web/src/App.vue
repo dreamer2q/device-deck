@@ -40,12 +40,14 @@ onBeforeUnmount(() => {
         <span class="name">DeviceDeck</span><span class="edition">MVP</span>
       </RouterLink>
       <nav aria-label="主导航">
-        <RouterLink to="/" class="tab" active-class="on" exact>设备总览</RouterLink>
-        <RouterLink to="/queue" class="tab" active-class="on">队列</RouterLink>
-        <RouterLink to="/app-distribution" class="tab" active-class="on">应用分发</RouterLink>
-        <RouterLink to="/virtual-machines" class="tab" active-class="on">虚拟机</RouterLink>
-        <RouterLink to="/device-config" class="tab" active-class="on">设备配置</RouterLink>
-        <RouterLink to="/analytics" class="tab" active-class="on">大盘</RouterLink>
+        <RouterLink to="/" class="tab" active-class="on" exact>设备</RouterLink>
+        <RouterLink to="/queue" class="tab" active-class="on">任务</RouterLink>
+        <details class="more"><summary class="tab">工具与设置</summary><div class="more-menu" @click="e => { if (e.target.closest('a')) e.currentTarget.parentElement.open = false }">
+          <RouterLink to="/app-distribution">应用分发</RouterLink>
+          <RouterLink to="/virtual-machines">模拟器管理</RouterLink>
+          <RouterLink to="/device-config">设备设置</RouterLink>
+          <RouterLink to="/analytics">任务统计</RouterLink>
+        </div></details>
       </nav>
       <div class="meta">
         <span v-if="infraDemo">设备管理测试 · AI 未启用</span>
@@ -139,6 +141,7 @@ nav {
   background: #e8f1fe;
   color: #1565c0;
 }
+.more { position: relative; }.more summary { cursor: pointer; list-style: none; }.more-menu { position: absolute; top: 30px; left: 0; width: 150px; border: 1px solid #dce4ee; background: #fff; border-radius: 5px; padding: 5px; box-shadow: 0 5px 18px #21314a15; }.more-menu a { display: block; padding: 9px; text-decoration: none; font-size: 12px; color: #596b82; }.more-menu a:hover { background: #f0f6fd; }
 .meta {
   margin-left: auto;
   color: #6b7280;
@@ -154,7 +157,7 @@ main {
 }
 @media (max-width: 760px) {
   .top { flex-wrap: wrap; gap: 5px 12px; padding: 7px 10px; }
-  nav { order: 3; width: 100%; overflow-x: auto; flex-shrink: 0; white-space: nowrap; padding-bottom: 2px; }
+  nav { order: 3; width: 100%; flex-shrink: 0; white-space: nowrap; padding-bottom: 2px; }
   .tab { flex-shrink: 0; padding: 7px 9px; }
 }
 </style>
