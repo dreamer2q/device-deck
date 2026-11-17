@@ -1,0 +1,133 @@
+{
+  "samples": [
+    {
+      "ms": 792.5,
+      "changed": true
+    },
+    {
+      "ms": 347.7,
+      "changed": true
+    },
+    {
+      "ms": 443.0,
+      "changed": true
+    },
+    {
+      "ms": 363.8,
+      "changed": true
+    },
+    {
+      "ms": 346.2,
+      "changed": true
+    },
+    {
+      "ms": 371.0,
+      "changed": true
+    },
+    {
+      "ms": 431.3,
+      "changed": true
+    },
+    {
+      "ms": 359.8,
+      "changed": true
+    },
+    {
+      "ms": 429.7,
+      "changed": true
+    },
+    {
+      "ms": 356.8,
+      "changed": true
+    },
+    {
+      "ms": 436.1,
+      "changed": true
+    },
+    {
+      "ms": 359.3,
+      "changed": true
+    },
+    {
+      "ms": 438.8,
+      "changed": true
+    },
+    {
+      "ms": 351.5,
+      "changed": true
+    },
+    {
+      "ms": 436.3,
+      "changed": true
+    },
+    {
+      "ms": 346.1,
+      "changed": true
+    },
+    {
+      "ms": 371.5,
+      "changed": true
+    },
+    {
+      "ms": 438.0,
+      "changed": true
+    },
+    {
+      "ms": 482.8,
+      "changed": true
+    },
+    {
+      "ms": 280.2,
+      "changed": true
+    },
+    {
+      "ms": 430.7,
+      "changed": true
+    },
+    {
+      "ms": 445.7,
+      "changed": true
+    },
+    {
+      "ms": 343.4,
+      "changed": true
+    },
+    {
+      "ms": 434.6,
+      "changed": true
+    },
+    {
+      "ms": 361.6,
+      "changed": true
+    },
+    {
+      "ms": 497.5,
+      "changed": true
+    },
+    {
+      "ms": 374.2,
+      "changed": true
+    },
+    {
+      "ms": 428.0,
+      "changed": true
+    },
+    {
+      "ms": 519.7,
+      "changed": true
+    },
+    {
+      "ms": 428.8,
+      "changed": true
+    }
+  ],
+  "p50_ms": 428.0,
+  "p95_ms": 519.7,
+  "resolution": [
+    410,
+    892
+  ],
+  "boundary": "Mini loopback HTTP input submission to WebSocket JPEG receipt and Python decode; excludes browser input/foreground paint/physical scanout",
+  "device": "iPhone 17 Pro, iOS Simulator 26.2",
+  "host": "M4 16GB, existing PDF jobs active"
+}

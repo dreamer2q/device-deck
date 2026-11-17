@@ -53,6 +53,7 @@ test('WDA host blockers do not mislabel Android or block Simulator for missing p
 test('a paused or occupied device remains explicit without granting control', () => {
   const [d] = mergeResources([live], [vm], agents)
   assert.equal(resourceStatus({ ...d, lock: { holder_type: 'job', holder: 'run' } }).label, 'Agent 执行中')
+  assert.equal(resourceCanOpen({ ...d, lock: { holder_type: 'job', holder: 'run' } }), false)
   const paused = { ...d, extra: { ...d.extra, mirror_paused: true } }
   assert.equal(resourceCanOpen(paused), false)
   assert.equal(resourceStatus(paused).label, '镜像已暂停')

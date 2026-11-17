@@ -14,6 +14,14 @@
   catalog as an explicit configuration-only option, and preserve server dispatch preflight.
 - Xcode/physical signing/Simulator runtime installation and actual device validation
   are separate deployment gates; this version does not imply they have passed.
+- Distinguish a hidden workbench waiting for foreground from a real lease conflict;
+  show occupied-device details without promising a read-only mirror.
+- Preserve simulator identity during incomplete discovery while marking the snapshot
+  untrusted; retain the manager's verified name for subsequent WDA identity checks.
+- Keep long native inspection diagnostics out of the bounded database error code,
+  retaining the full message without turning a preflight conflict into HTTP 500.
+- Record actual Simulator control, same-instance reopening and the separate
+  server-input-to-returned-image measurement in `docs/validation/ios-0002`.
 
 ## DeviceDeck 0.1.0 MVP — 2026-11-17
 

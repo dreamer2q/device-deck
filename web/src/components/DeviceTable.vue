@@ -14,7 +14,8 @@ const emit = defineEmits(['details', 'start'])
       <div class="type"><span class="chip">{{ platformLabel(d) }} · {{ isVirtual(d) ? '模拟器' : '真机' }}</span><div class="secondary">{{ d.os_version || '系统待检测' }}</div></div>
       <div class="state"><span class="status" :class="resourceStatus(d).cls"><i />{{ resourceStatus(d).label }}</span><div v-if="resourceStatus(d).hint" class="secondary hint" :title="resourceStatus(d).hint">{{ resourceStatus(d).hint }}</div><div v-if="d.lock" class="secondary">{{ d.lock.holder || '占用者未知' }}</div></div>
       <div class="actions">
-        <RouterLink v-if="resourceCanOpen(d)" class="primary" :to="`/device/${encodeURIComponent(d.serial)}`">{{ d.lock ? '查看' : '打开' }}</RouterLink>
+        <button v-if="d.lock" class="primary" @click="emit('details', d)">占用详情</button>
+        <RouterLink v-else-if="resourceCanOpen(d)" class="primary" :to="`/device/${encodeURIComponent(d.serial)}`">打开</RouterLink>
         <button v-else-if="d.vm && canStart(d.vm)" class="primary" :disabled="!!busy" @click="emit('start', d)">{{ busy === d.resource_id ? '提交中…' : '启动' }}</button>
         <button v-else class="primary" @click="emit('details', d)">检查状态</button>
         <button class="detail" @click="emit('details', d)">详情</button>

@@ -47,7 +47,7 @@ export function resourceStatus(d) {
 
 export function resourceCanOpen(d) {
   if (isVirtual(d) && !d.vm) return false
-  return !!d.serial && d.live && d.agent_online && d.status === 'online'
+  return !d.lock && !!d.serial && d.live && d.agent_online && d.status === 'online'
     && d.extra?.readiness?.ready === true && !d.extra?.mirror_paused
     && (!d.vm || (vmLifecycle(d.vm).state === 'running' && vmLifecycle(d.vm).agent_online))
 }

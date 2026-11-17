@@ -41,7 +41,7 @@ function timeLabel(value) { return value ? new Date(value).toLocaleString() : '�
       <p v-else class="help">{{ device.extra?.readiness?.hint || device.extra?.reason || '控制状态来自设备探活；画面解码与输入诊断位于工作台。' }}</p>
       <button @click="emit('refresh')">刷新已上报状态</button>
     </section>
-    <footer><button @click="dialog.close()">关闭</button><RouterLink v-if="resourceCanOpen(device)" class="primary" :to="`/device/${encodeURIComponent(device.serial)}`">{{ device.lock ? '查看工作台' : '打开工作台' }}</RouterLink><button v-else-if="device.vm && canStart(device.vm)" class="primary" :disabled="!!busy" @click="emit('start', device)">启动模拟器</button></footer>
+    <footer><button @click="dialog.close()">关闭</button><RouterLink v-if="resourceCanOpen(device)" class="primary" :to="`/device/${encodeURIComponent(device.serial)}`">打开工作台</RouterLink><button v-else-if="!device.lock && device.vm && canStart(device.vm)" class="primary" :disabled="!!busy" @click="emit('start', device)">启动模拟器</button></footer>
   </dialog>
 </template>
 
